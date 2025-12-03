@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>流转卡管理系统</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/element-ui/lib/theme-chalk/index.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 导航栏 -->
+        <el-container v-if="isLoggedIn">
+            <el-header :class="{ 'admin-header': isAdmin }">
+                <el-menu 
+                    :default-active="activeMenu" 
+                    class="el-menu-demo" 
+                    mode="horizontal"
+                    @select="handleMenuSelect">
+                    <!-- 工作台模块 -->
+                    <el-menu-item index="dashboard">
+                        <i class="el-icon-s-home"></i> 工作台
+                    </el-menu-item>
+                    
+                    <!-- 流转卡相关 -->
+                    <el-submenu index="cards" v-if="canViewCards">
+                        <template slot="title">
+                            <i class="el-icon-document"></i> 流转卡
+                        </template>
+                        <el-menu-item index="cards">流转卡管理</el-menu-item>
+                    </el-submenu>
+                    
+                    <!-- 模板设计模块（管理员） -->
+                    <el-submenu index="template" v-if="isAdmin">
+                        <template slot="title">
+                            <i class="el-icon-s-grid"></i> 模板设计
+                        </template>
+                        <el-menu-item index="template-management">模板列表</el-menu-item>
+                        <el-menu-item index="field-management">字段库管理</el-menu-item>
+                    </el-submenu>
+                    
+                    <!-- 系统管理模块（管理员） -->
+                    <el-submenu index="system" v-if="isAdmin">
+                        <template slot="title">
+                            <i class="el-icon-setting"></i> 系统管理
+                        </template>
+                        <el-menu-item index="user-management">用户管理</el-menu-item>
+                        <el-menu-item index="department-management">部门管理</el-menu-item>
+                    </el-submenu>
+                    
+                    <!-- 用户菜单 -->
+                    <el-submenu index="user" style="float: right;">
+                        <template slot="title">
+                            <i class="el-icon-user"></i> {{ currentUser.real_name }}
+                        </template>
+                        <el-menu-item index="profile">
+                            <i class="el-icon-info"></i> 个人信息
+                        </el-menu-item>
+                        <el-menu-item index="logout">
+                            <i class="el-icon-switch-button"></i> 退出登录
+                        </el-menu-item>
+                    </el-submenu>
+                </el-menu>
+            </el-header>
+            
+            <el-main :class="{ 'admin-page': isAdmin }">
+                <!-- 工作台页面 -->
+                <div v-if="activeMenu === 'dashboard'">
+                    <h2>工作台</h2>
+                    <el-row :gutter="20">
+                        <el-col :span="8">
+                            <el-card>
+                                <div slot="header">
+                                    <span>我的流转卡</span>
+                                </div>
+                                <el-statistic title="待处理" :value="dashboardData.pendingCards" />
+                            </el-card>
+                        </el-col>
+                        <el-col :span="8">
+                            <el-card>
+                                <div slot="header">
+                                    <span>已完成</span>
+                                </div>
+                                <el-statistic title="今日完成" :value="dashboardData.completedToday" />
+                            </el-card>
+                        </el-col>
+                        <el-col :span="8">
+                            <el-card>
+                                <div slot="header">
+                                    <span>本周统计</span>
+                                </div>
+                                <el-statistic title="本周处理" :value="dashboardData.weeklyTotal" />
+                            </el-card>
+                        </el-col>
+                    </el-row>
+                    
+                    <el-card style="margin-top: 20px;">
+                        <div slot="header">
+                            <span>最近操作</span>
+                        </div>
+                        <el-table :data="recentOperations" style="width: 100%">
+                            <el-table-column prop="card_number" label="流转卡号" width="150"></el-table-column>
+                            <el-table-column prop="action" label="操作" width="100"></el-table-column>
+                            <el-table-column prop="description" label="描述"></el-table-column>
+                            <el-table-column prop="created_at" label="时间" width="180"></el-table-column>
+                        </el-table>
+                    </el-card>
+                </div>
+                
+                <!-- 流转卡管理页面 - 重新设计 -->
+                <div v-if="activeMenu === 'cards'">
+                    <!-- 页面标题和操作栏 -->
+                    <div class="page-header">
+                        <div class="page-title">
+                            <h2>流转卡管理</h2>
+                            <p>查看和填写流转卡数据</p>
+                        </div>
+                        <div class="page-actions">
+                            <el-button icon="el-icon-refresh" @click="refreshCards">刷新</el-button>
+                        </div>
+                    </div>
+
+                    <!-- 筛选和搜索栏 -->
+                    <div class="filter-bar">
+                        <el-row :gutter="20">
+                            <el-col :span="6">
+                                <el-input 
+                                    v-model="cardSearchKeyword" 
+                                    placeholder="搜索流转卡号或标题..." 
+                                    clearable
+                                    prefix-icon="el-icon-search">
+                                </el-input>
+                            </el-col>
+                            <el-col :span="4">
+                                <el-select v-model="cardStatusFilter" placeholder="状态筛选" clearable style="width: 100%;">
+                                    <el-option label="草稿" value="draft"></el-option>
+                                    <el-option label="进行中" value="in_progress"></el-option>
+                                    <el-option label="已完成" value="completed"></el-option>
+                                    <el-option label="已取消" value="cancelled"></el-option>
+                                </el-select>
+                            </el-col>
+                            <el-col :span="4">
+                                <el-select v-model="cardTemplateFilter" placeholder="模板筛选" clearable style="width: 100%;">
+                                    <el-option v-for="template in templates" :key="template.id" :label="template.template_name" :value="template.template_name"></el-option>
+                                </el-select>
+                            </el-col>
+                        </el-row>
+                    </div>
+
+                    <!-- 流转卡列表 -->
+                    <div class="card-list">
+                        <el-table :data="filteredTemplateCards" style="width: 100%" v-loading="loading">
+                            <el-table-column prop="card_number" label="流转卡号" width="140" sortable>
+                                <template slot-scope="scope">
+                                    <el-link type="primary" @click="viewCardDetail(scope.row)" :underline="false">
+                                        {{ scope.row.card_number }}
+                                    </el-link>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="template_name" label="模板" width="150" show-overflow-tooltip></el-table-column>
+                            <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip></el-table-column>
+                            <el-table-column prop="row_count" label="数据行数" width="100" align="center">
+                                <template slot-scope="scope">
+                                    <el-badge :value="scope.row.row_count || 0" class="item" type="primary">
+                                        <span>{{ scope.row.row_count || 0 }}</span>
+                                    </el-badge>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="status" label="状态" width="100" align="center">
+                                <template slot-scope="scope">
+                                    <el-tag :type="getStatusType(scope.row.status)" size="small">
+                                        {{ getStatusText(scope.row.status) }}
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="creator_name" label="创建人" width="100"></el-table-column>
+                            <el-table-column prop="created_at" label="创建时间" width="160" sortable>
+                                <template slot-scope="scope">
+                                    {{ formatDateTime(scope.row.created_at) }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="200" fixed="right">
+                                <template slot-scope="scope">
+                                    <el-button size="mini" @click="viewCardDetail(scope.row)">查看</el-button>
+                                    <el-button size="mini" type="primary" @click="editCardData(scope.row)" v-if="canEditCard(scope.row)">填写数据</el-button>
+                                    <el-button size="mini" type="danger" @click="deleteTemplateCard(scope.row)" v-if="canDeleteCard(scope.row)">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+                        
+                        <!-- 空状态提示 -->
+                        <div v-if="!loading && filteredTemplateCards.length === 0" class="empty-state">
+                            <el-empty description="暂无流转卡数据"></el-empty>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 快速创建流转卡页面 -->
+                <div v-if="activeMenu === 'create-card'">
+                    <!-- 页面标题和操作栏 -->
+                    <div class="page-header">
+                        <div class="page-title">
+                            <h2>快速创建流转卡</h2>
+                            <p>选择模板并快速创建新的流转卡，简化操作流程</p>
+                        </div>
+                    </div>
+
+                    <!-- 创建向导 -->
+                    <el-steps :active="createCardStep" finish-status="success" align-center style="margin-bottom: 30px;">
+                        <el-step title="选择模板" description="选择适合的流转卡模板"></el-step>
+                        <el-step title="配置基本信息" description="填写流转卡基本信息"></el-step>
+                        <el-step title="完成创建" description="确认信息并创建流转卡"></el-step>
+                    </el-steps>
+
+                    <!-- 步骤1：选择模板 -->
+                    <div v-if="createCardStep === 0" class="create-card-step">
+                        <h3>选择模板</h3>
+                        <el-row :gutter="20">
+                            <el-col :span="8" v-for="template in activeTemplates" :key="template.id">
+                                <el-card class="template-card" :class="{ selected: selectedTemplate && selectedTemplate.id === template.id }" 
+                                        @click.native="selectTemplate(template)" shadow="hover">
+                                    <div class="template-card-header">
+                                        <h4>{{ template.template_name }}</h4>
+                                        <el-tag :type="template.is_active ? 'success' : 'danger'" size="mini">
+                                            {{ template.is_active ? '启用' : '禁用' }}
+                                        </el-tag>
+                                    </div>
+                                    <p class="template-description">{{ template.template_description || '暂无描述' }}</p>
+                                    <div class="template-info">
+                                        <span><i class="el-icon-collection"></i> {{ template.field_count || 0 }} 个字段</span>
+                                        <span><i class="el-icon-user"></i> {{ template.created_by || '未知' }}</span>
+                                    </div>
+                                </el-card>
+                            </el-col>
+                        </el-row>
+                        
+                        <div class="step-actions">
+                            <el-button type="primary" @click="nextStep" :disabled="!selectedTemplate">
+                                下一步 <i class="el-icon-arrow-right"></i>
+                            </el-button>
+                        </div>
+                    </div>
+
+                    <!-- 步骤2：配置基本信息 -->
+                    <div v-if="createCardStep === 1" class="create-card-step">
+                        <h3>配置流转卡信息</h3>
+                        <el-form :model="quickCreateForm" label-width="120px" :rules="quickCreateRules" ref="quickCreateForm">
+                            <el-row :gutter="20">
+                                <el-col :span="12">
+                                    <el-form-item label="选择模板" prop="template">
+                                        <el-input v-model="selectedTemplate.template_name" disabled></el-input>
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="12">
+                                    <el-form-item label="流转卡号" prop="card_number">
+                                        <el-input v-model="quickCreateForm.card_number" placeholder="请输入流转卡号"></el-input>
+                                    </el-form-item>
+                                </el-col>
+                            </el-row>
+                            <el-row :gutter="20">
+                                <el-col :span="12">
+                                    <el-form-item label="标题" prop="title">
+                                        <el-input v-model="quickCreateForm.title" placeholder="请输入流转卡标题"></el-input>
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="12">
+                                    <el-form-item label="责任人" prop="responsible_person">
+                                        <el-input v-model="quickCreateForm.responsible_person" placeholder="请输入责任人姓名"></el-input>
+                                    </el-form-item>
+                                </el-col>
+                            </el-row>
+                            <el-form-item label="描述" prop="description">
+                                <el-input v-model="quickCreateForm.description" type="textarea" rows="3" placeholder="请输入流转卡描述"></el-input>
+                            </el-form-item>
+                            <el-row :gutter="20">
+                                <el-col :span="8">
+                                    <el-form-item label="初始行数" prop="row_count">
+                                        <el-input-number v-model="quickCreateForm.row_count" :min="1" :max="100" placeholder="行数"></el-input-number>
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="8">
+                                    <el-form-item label="创建日期" prop="create_date">
+                                        <el-date-picker v-model="quickCreateForm.create_date" type="date" placeholder="选择日期" style="width: 100%;"></el-date-picker>
+                                    </el-form-item>
+                                </el-col>
+                                <el-col :span="8">
+                                    <el-form-item label="状态" prop="status">
+                                        <el-select v-model="quickCreateForm.status" placeholder="选择状态" style="width: 100%;">
+                                            <el-option label="草稿" value="draft"></el-option>
+                                            <el-option label="进行中" value="in_progress"></el-option>
+                                            <el-option label="已完成" value="completed"></el-option>
+                                        </el-select>
+                                    </el-form-item>
+                                </el-col>
+                            </el-row>
+                        </el-form>
+                        
+                        <!-- 模板字段预览 -->
+                        <div class="template-fields-preview">
+                            <h4>模板字段预览</h4>
+                            <el-table :data="selectedTemplateFields" border size="small">
+                                <el-table-column prop="display_name" label="字段名称" width="150"></el-table-column>
+                                <el-table-column prop="field_type" label="字段类型" width="100">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="getFieldTypeColor(scope.row.field_type)" size="mini">
+                                            {{ getFieldTypeText(scope.row.field_type) }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="department_name" label="负责部门" width="120">
+                                    <template slot-scope="scope">
+                                        <el-tag v-if="scope.row.department_name" type="primary" size="mini">{{ scope.row.department_name }}</el-tag>
+                                        <span v-else style="color: #999;">未分配</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="is_required" label="必填" width="80" align="center">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="scope.row.is_required ? 'success' : 'info'" size="mini">
+                                            {{ scope.row.is_required ? '是' : '否' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="描述" show-overflow-tooltip>
+                                    <template slot-scope="scope">
+                                        {{ scope.row.description || '暂无描述' }}
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </div>
+                        
+                        <div class="step-actions">
+                            <el-button @click="prevStep">
+                                <i class="el-icon-arrow-left"></i> 上一步
+                            </el-button>
+                            <el-button type="primary" @click="nextStep">
+                                下一步 <i class="el-icon-arrow-right"></i>
+                            </el-button>
+                        </div>
+                    </div>
+
+                    <!-- 步骤3：确认并创建 -->
+                    <div v-if="createCardStep === 2" class="create-card-step">
+                        <h3>确认流转卡信息</h3>
+                        <el-descriptions :column="2" border>
+                            <el-descriptions-item label="模板">{{ selectedTemplate.template_name }}</el-descriptions-item>
+                            <el-descriptions-item label="流转卡号">{{ quickCreateForm.card_number }}</el-descriptions-item>
+                            <el-descriptions-item label="标题">{{ quickCreateForm.title }}</el-descriptions-item>
+                            <el-descriptions-item label="责任人">{{ quickCreateForm.responsible_person }}</el-descriptions-item>
+                            <el-descriptions-item label="初始行数">{{ quickCreateForm.row_count }}</el-descriptions-item>
+                            <el-descriptions-item label="状态">
+                                <el-tag :type="getStatusType(quickCreateForm.status)">
+                                    {{ getStatusText(quickCreateForm.status) }}
+                                </el-tag>
+                            </el-descriptions-item>
+                            <el-descriptions-item label="创建日期">{{ quickCreateForm.create_date }}</el-descriptions-item>
+                            <el-descriptions-item label="描述" :span="2">{{ quickCreateForm.description || '暂无描述' }}</el-descriptions-item>
+                        </el-descriptions>
+                        
+                        <div class="step-actions">
+                            <el-button @click="prevStep">
+                                <i class="el-icon-arrow-left"></i> 上一步
+                            </el-button>
+                            <el-button type="primary" @click="confirmCreateCard" :loading="creatingCard">
+                                <i class="el-icon-check"></i> 确认创建
+                            </el-button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 用户管理页面 -->
+                <div v-if="activeMenu === 'user-management'">
+                    <div style="margin-bottom: 20px;">
+                        <el-button type="primary" @click="showCreateUserDialog" :class="{ 'admin-button': isAdmin }">新建用户</el-button>
+                    </div>
+                    
+                    <el-table :data="users" style="width: 100%">
+                        <el-table-column prop="username" label="用户名" width="150"></el-table-column>
+                        <el-table-column prop="real_name" label="姓名" width="150"></el-table-column>
+                        <el-table-column prop="department_name" label="部门" width="150"></el-table-column>
+                        <el-table-column prop="role" label="角色" width="100"></el-table-column>
+                        <el-table-column label="操作" width="200">
+                            <template slot-scope="scope">
+                                <el-button size="mini" @click="editUser(scope.row)">编辑</el-button>
+                                <el-button size="mini" type="danger" @click="deleteUser(scope.row)">删除</el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </div>
+                
+                <!-- 部门管理页面 -->
+                <div v-if="activeMenu === 'department-management'">
+                    <div style="margin-bottom: 20px;">
+                        <el-button type="primary" @click="showCreateDepartmentDialog">新建部门</el-button>
+                    </div>
+                    
+                    <el-table :data="departments" style="width: 100%">
+                        <el-table-column prop="name" label="部门名称" width="200"></el-table-column>
+                        <el-table-column prop="description" label="描述"></el-table-column>
+                        <el-table-column label="操作" width="200">
+                            <template slot-scope="scope">
+                                <el-button size="mini" @click="editDepartment(scope.row)">编辑</el-button>
+                                <el-button size="mini" type="danger" @click="deleteDepartment(scope.row)">删除</el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </div>
+                
+                <!-- 模板管理页面 -->
+                <div v-if="activeMenu === 'template-management'">
+                    <div style="margin-bottom: 20px;">
+                        <el-button type="primary" @click="showCreateTemplateDialog">新建模板</el-button>
+                        <el-button @click="refreshTemplates">刷新</el-button>
+                        <span style="margin-left: 20px; color: #666;">
+                            共 {{ templates.length }} 个模板
+                        </span>
+                    </div>
+                    
+                    <!-- 模板状态筛选 -->
+                    <div style="margin-bottom: 20px;">
+                        <el-select v-model="templateStatusFilter" placeholder="按状态筛选" clearable style="width: 150px;">
+                            <el-option label="启用" value="true"></el-option>
+                            <el-option label="禁用" value="false"></el-option>
+                        </el-select>
+                    </div>
+                    
+                    <el-table :data="filteredTemplates" style="width: 100%">
+                        <el-table-column prop="template_name" label="模板名称" min-width="180" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="template_description" label="描述" min-width="200" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="is_active" label="状态" width="140" align="center">
+                            <template slot-scope="scope">
+                                <div style="display: flex; align-items: center; justify-content: center;">
+                                    <el-switch 
+                                        v-model="scope.row.is_active" 
+                                        @change="handleStatusChange(scope.row)"
+                                        :active-value="true"
+                                        :inactive-value="false"
+                                        size="mini"
+                                        style="margin-right: 8px;">
+                                    </el-switch>
+                                    <el-tag :type="(scope.row.is_active === 1 || scope.row.is_active === true) ? 'success' : 'danger'" size="mini">
+                                        {{ (scope.row.is_active === 1 || scope.row.is_active === true) ? '启用' : '禁用' }}
+                                    </el-tag>
+                                </div>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="field_count" label="字段数量" width="100" align="center">
+                            <template slot-scope="scope">
+                                <el-badge :value="scope.row.field_count || 0" class="item">
+                                    <span>{{ scope.row.field_count || 0 }}</span>
+                                </el-badge>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="created_by" label="创建人" width="100"></el-table-column>
+                        <el-table-column prop="created_at" label="创建时间" width="160"></el-table-column>
+                        <el-table-column label="操作" width="400" fixed="right">
+                            <template slot-scope="scope">
+                                <el-button size="mini" @click="editTemplate(scope.row)" style="margin-right: 5px;">编辑</el-button>
+                                <el-button size="mini" type="info" @click="manageTemplateFields(scope.row)" style="margin-right: 5px;">字段管理</el-button>
+                                <el-button size="mini" type="success" @click="createCardFromTemplate(scope.row)" style="margin-right: 5px;">创建流转卡</el-button>
+                                <el-button size="mini" type="danger" @click="deleteTemplate(scope.row)">删除</el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </div>
+                
+                <!-- 字段管理页面 -->
+                <div v-if="activeMenu === 'field-management'">
+                    <div style="margin-bottom: 20px;">
+                        <el-button type="primary" @click="showCreateFieldDialog">新建字段</el-button>
+                        <el-button @click="refreshFields">刷新</el-button>
+                        <span style="margin-left: 20px; color: #666;">
+                            共 {{ fieldCountDisplay }} 个字段
+                        </span>
+                    </div>
+                    
+                    <!-- 字段部门和类型筛选 -->
+                    <div style="margin-bottom: 20px;">
+                        <el-select v-model="fieldDepartmentFilter" placeholder="按部门筛选" clearable style="width: 200px; margin-right: 10px;">
+                            <el-option v-for="dept in departments" :key="dept.id" :label="dept.name" :value="dept.name"></el-option>
+                            <el-option label="未分配" value="未分配"></el-option>
+                        </el-select>
+                        <el-select v-model="fieldTypeFilter" placeholder="按字段类型筛选" clearable style="width: 150px;">
+                            <el-option v-for="type in fieldTypes" :key="type.value" :label="type.label" :value="type.value"></el-option>
+                        </el-select>
+                    </div>
+                    
+                    <el-table :data="filteredFields" style="width: 100%" border>
+                        <el-table-column prop="name" label="字段名称" width="180" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="display_name" label="显示名称" width="150" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="field_type" label="字段类型" width="120">
+                            <template slot-scope="scope">
+                                <el-tag :type="getFieldTypeColor(scope.row.field_type)">
+                                    {{ getFieldTypeText(scope.row.field_type) }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="category" label="分类" width="150" show-overflow-tooltip></el-table-column>
+                        <el-table-column prop="department_name" label="负责部门" width="120" show-overflow-tooltip>
+                            <template slot-scope="scope">
+                                <el-tag v-if="scope.row.department_name" type="primary" size="mini">{{ scope.row.department_name }}</el-tag>
+                                <span v-else style="color: #999;">未分配</span>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="is_required" label="必填" width="80" align="center">
+                            <template slot-scope="scope">
+                                <el-tag :type="scope.row.is_required ? 'success' : 'info'" size="mini">
+                                    {{ scope.row.is_required ? '是' : '否' }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column prop="is_hidden" label="隐藏" width="80" align="center">
+                            <template slot-scope="scope">
+                                <el-tag :type="scope.row.is_hidden ? 'danger' : 'success'" size="mini">
+                                    {{ scope.row.is_hidden ? '隐藏' : '可见' }}
+                                </el-tag>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="选项预览" width="120" show-overflow-tooltip>
+                            <template slot-scope="scope">
+                                <span v-if="scope.row.field_type === 'select' && scope.row.options">
+                                    {{ Array.isArray(scope.row.options) ? scope.row.options.slice(0, 2).join(', ') + 
+                                       (scope.row.options.length > 2 ? '...' : '') : JSON.parse(scope.row.options || '[]').slice(0, 2).join(', ') + 
+                                       (JSON.parse(scope.row.options || '[]').length > 2 ? '...' : '') }}
+                                </span>
+                                <span v-else>-</span>
+                            </template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="280" fixed="right">
+                            <template slot-scope="scope">
+                                <el-button size="mini" @click="editField(scope.row)" style="margin-right: 5px;">编辑</el-button>
+                                <el-button size="mini" type="info" @click="viewFieldDetails(scope.row)" style="margin-right: 5px;">详情</el-button>
+                                <el-button size="mini" type="danger" @click="deleteField(scope.row)">删除</el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </div>
+            </el-main>
+        </el-container>
+        
+        <!-- 登录页面 -->
+        <div v-else class="login-container" :class="{ 'admin-login': loginType === 'admin' }">
+            <el-card class="login-card">
+                <div slot="header">
+                    <h2>流转卡管理系统</h2>
+                    <el-radio-group v-model="loginType" style="margin-top: 10px;">
+                        <el-radio label="user">用户登录</el-radio>
+                        <el-radio label="admin">管理员登录</el-radio>
+                    </el-radio-group>
+                </div>
+                <el-form :model="loginForm" ref="loginForm" :rules="loginRules">
+                    <el-form-item prop="username">
+                        <el-input v-model="loginForm.username" :placeholder="loginType === 'admin' ? '管理员用户名' : '用户名'"></el-input>
+                    </el-form-item>
+                    <el-form-item prop="password">
+                        <el-input v-model="loginForm.password" type="password" placeholder="密码"></el-input>
+                    </el-form-item>
+                    <el-form-item v-if="loginType === 'user'" prop="department_id">
+                        <el-select v-model="loginForm.department_id" placeholder="请选择部门" style="width: 100%;">
+                            <el-option v-for="dept in departments" :key="dept.id" :label="dept.name" :value="dept.id"></el-option>
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item>
+                        <el-button type="primary" @click="login" style="width: 100%;">{{ loginType === 'admin' ? '管理员登录' : '用户登录' }}</el-button>
+                    </el-form-item>
+                </el-form>
+            </el-card>
+        </div>
+        
+        <!-- 流转卡编辑对话框 -->
+        <el-dialog title="流转卡编辑" :visible.sync="cardDialogVisible" width="80%">
+            <el-form :model="cardForm" label-width="120px" ref="cardForm">
+                <el-form-item label="流转卡号" prop="card_number">
+                    <el-input v-model="cardForm.card_number" :disabled="isEditMode"></el-input>
+                </el-form-item>
+                <el-form-item label="物料编码" prop="material_code">
+                    <el-input v-model="cardForm.material_code"></el-input>
+                </el-form-item>
+                <el-form-item label="物料描述" prop="material_description">
+                    <el-input v-model="cardForm.material_description"></el-input>
+                </el-form-item>
+                <el-form-item label="状态" prop="status">
+                    <el-select v-model="cardForm.status" placeholder="请选择状态" style="width: 100%;">
+                        <el-option label="草稿" value="draft"></el-option>
+                        <el-option label="审核中" value="in_progress"></el-option>
+                        <el-option label="已完成" value="completed"></el-option>
+                        <el-option label="已取消" value="cancelled"></el-option>
+                    </el-select>
+                </el-form-item>
+                
+                <!-- 动态字段 -->
+                <el-form-item v-for="field in editableFields" :key="field.id" :label="field.display_name">
+                    <el-input v-if="field.field_type === 'text'" v-model="cardForm.field_data[field.name]"></el-input>
+                    <el-input-number v-else-if="field.field_type === 'number'" v-model="cardForm.field_data[field.name]"></el-input-number>
+                    <el-date-picker v-else-if="field.field_type === 'date'" v-model="cardForm.field_data[field.name]" type="date"></el-date-picker>
+                    <el-select v-else-if="field.field_type === 'select'" v-model="cardForm.field_data[field.name]">
+                        <el-option v-for="option in field.options" :key="option" :label="option" :value="option"></el-option>
+                    </el-select>
+                    <el-switch v-else-if="field.field_type === 'boolean'" v-model="cardForm.field_data[field.name]"></el-switch>
+                </el-form-item>
+            </el-form>
+            <div slot="footer">
+                <el-button @click="cardDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveCard">保存</el-button>
+            </div>
+        </el-dialog>
+        
+        <!-- 用户管理对话框 -->
+        <el-dialog :title="isUserEditMode ? '编辑用户' : '新增用户'" :visible.sync="userDialogVisible" width="600px">
+            <el-form :model="userForm" label-width="100px" ref="userForm">
+                <el-form-item label="用户名">
+                    <el-input v-model="userForm.username" :disabled="isUserEditMode"></el-input>
+                </el-form-item>
+                <el-form-item label="密码">
+                    <el-input v-model="userForm.password" type="password" :placeholder="isUserEditMode ? '留空则不修改密码' : ''"></el-input>
+                </el-form-item>
+                <el-form-item label="真实姓名">
+                    <el-input v-model="userForm.real_name"></el-input>
+                </el-form-item>
+                <el-form-item label="部门">
+                    <el-select v-model="userForm.department_id" placeholder="请选择部门" style="width: 100%;">
+                        <el-option v-for="dept in departments" :key="dept.id" :label="dept.name" :value="dept.id"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="角色">
+                    <el-select v-model="userForm.role" style="width: 100%;">
+                        <el-option label="普通用户" value="user"></el-option>
+                        <el-option label="管理员" value="admin"></el-option>
+                    </el-select>
+                </el-form-item>
+            </el-form>
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="userDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveUser">确定</el-button>
+            </div>
+        </el-dialog>
+        
+        <!-- 部门管理对话框 -->
+        <el-dialog :title="isDepartmentEditMode ? '编辑部门' : '新增部门'" :visible.sync="departmentDialogVisible" width="600px">
+            <el-form :model="departmentForm" label-width="100px" ref="departmentForm">
+                <el-form-item label="部门名称">
+                    <el-input v-model="departmentForm.name"></el-input>
+                </el-form-item>
+                <el-form-item label="部门描述">
+                    <el-input v-model="departmentForm.description" type="textarea" rows="3"></el-input>
+                </el-form-item>
+            </el-form>
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="departmentDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveDepartment">确定</el-button>
+            </div>
+        </el-dialog>
+        
+        <!-- 模板管理对话框 -->
+        <el-dialog :title="isTemplateEditMode ? '编辑模板' : '新增模板'" :visible.sync="templateDialogVisible" width="700px">
+            <el-form :model="templateForm" label-width="120px" ref="templateForm">
+                <el-form-item label="模板名称">
+                    <el-input v-model="templateForm.template_name"></el-input>
+                </el-form-item>
+                <el-form-item label="模板描述">
+                    <el-input v-model="templateForm.template_description" type="textarea" rows="3"></el-input>
+                </el-form-item>
+            </el-form>
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="templateDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveTemplate">确定</el-button>
+            </div>
+        </el-dialog>
+
+        <!-- 模板字段管理对话框 -->
+        <el-dialog title="模板字段管理" :visible.sync="templateFieldDialogVisible" width="90%">
+            <div style="margin-bottom: 20px;">
+                <h3>{{ currentTemplate.template_name }} - 字段管理</h3>
+                <el-button type="primary" @click="saveTemplateFields">保存字段配置</el-button>
+                <el-button @click="refreshTemplateFields">刷新</el-button>
+                <span style="margin-left: 20px; color: #666;">
+                    已选择 {{ selectedFieldCount }} 个字段
+                </span>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <el-input v-model="fieldSearchKeyword" placeholder="搜索字段名称..." style="width: 300px; margin-right: 10px;" clearable></el-input>
+                <el-select v-model="fieldDepartmentFilter" placeholder="按部门筛选" clearable style="width: 200px; margin-right: 10px;">
+                    <el-option label="全部部门" value=""></el-option>
+                    <el-option v-for="dept in departments" :key="dept.name" :label="dept.name" :value="dept.name"></el-option>
+                    <el-option label="未分配" value="未分配"></el-option>
+                </el-select>
+                <el-select v-model="fieldTypeFilter" placeholder="按类型筛选" clearable style="width: 150px;">
+                    <el-option label="全部类型" value=""></el-option>
+                    <el-option v-for="type in fieldTypes" :key="type.value" :label="type.label" :value="type.value"></el-option>
+                </el-select>
+            </div>
+            
+            <el-table :data="filteredTemplateFields" style="width: 100%" border>
+                <el-table-column width="60" align="center">
+                    <template slot="header" slot-scope="scope">
+                        <el-checkbox 
+                            v-model="selectAllFields" 
+                            @change="handleSelectAllChange"
+                            :indeterminate="isSelectAllIndeterminate">
+                        </el-checkbox>
+                    </template>
+                    <template slot-scope="scope">
+                        <el-checkbox v-model="scope.row.selected" @change="handleFieldSelectionChange(scope.row)"></el-checkbox>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="display_name" label="字段显示名" width="180" show-overflow-tooltip></el-table-column>
+                <el-table-column prop="name" label="字段名" width="150" show-overflow-tooltip></el-table-column>
+                <el-table-column prop="field_type" label="字段类型" width="100">
+                    <template slot-scope="scope">
+                        <el-tag :type="getFieldTypeColor(scope.row.field_type)" size="mini">
+                            {{ getFieldTypeText(scope.row.field_type) }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="department_name" label="负责部门" width="120">
+                    <template slot-scope="scope">
+                        <el-tag v-if="scope.row.department_name" type="primary" size="mini">{{ scope.row.department_name }}</el-tag>
+                        <span v-else style="color: #999; font-size: 12px;">未分配</span>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="category" label="分类" width="120" show-overflow-tooltip></el-table-column>
+                <el-table-column label="字段预览" min-width="200">
+                    <template slot-scope="scope">
+                        <div v-if="scope.row.field_type === 'text'">
+                            <el-input size="mini" placeholder="文本输入" readonly></el-input>
+                        </div>
+                        <div v-else-if="scope.row.field_type === 'number'">
+                            <el-input-number size="mini" placeholder="数字输入" readonly></el-input-number>
+                        </div>
+                        <div v-else-if="scope.row.field_type === 'date'">
+                            <el-date-picker size="mini" type="date" placeholder="日期选择" readonly style="width: 180px;"></el-date-picker>
+                        </div>
+                        <div v-else-if="scope.row.field_type === 'select'">
+                            <el-select size="mini" placeholder="选择项" readonly style="width: 180px;">
+                                <el-option label="选项预览" value="preview"></el-option>
+                            </el-select>
+                        </div>
+                        <div v-else-if="scope.row.field_type === 'boolean'">
+                            <el-switch size="mini" readonly></el-switch>
+                        </div>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="is_required" label="必填" width="80" align="center">
+                    <template slot-scope="scope">
+                        <el-tag :type="scope.row.is_required ? 'success' : 'info'" size="mini">
+                            {{ scope.row.is_required ? '是' : '否' }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+                <el-table-column prop="is_hidden" label="隐藏" width="80" align="center">
+                    <template slot-scope="scope">
+                        <el-tag :type="scope.row.is_hidden ? 'danger' : 'success'" size="mini">
+                            {{ scope.row.is_hidden ? '隐藏' : '可见' }}
+                        </el-tag>
+                    </template>
+                </el-table-column>
+            </el-table>
+        </el-dialog>
+
+        <!-- 基于模板创建流转卡对话框 - 表格格式 -->
+        <el-dialog title="基于模板创建流转卡" :visible.sync="createCardFromTemplateDialogVisible" width="90%">
+            <!-- 基本信息 -->
+            <el-form :model="templateCardForm" label-width="120px" ref="templateCardForm" style="margin-bottom: 20px;">
+                <el-row :gutter="20">
+                    <el-col :span="8">
+                        <el-form-item label="模板">
+                            <el-input v-model="currentTemplate.template_name" disabled></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="8">
+                        <el-form-item label="流转卡号">
+                            <el-input v-model="templateCardForm.card_number" placeholder="请输入流转卡号"></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="8">
+                        <el-form-item label="标题">
+                            <el-input v-model="templateCardForm.title" placeholder="请输入流转卡标题"></el-input>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+                <el-form-item label="描述">
+                    <el-input v-model="templateCardForm.description" type="textarea" rows="2" placeholder="请输入流转卡描述"></el-input>
+                </el-form-item>
+            </el-form>
+
+            <!-- 表格配置区域 -->
+            <el-form :model="templateCardForm" label-width="120px" ref="templateConfigForm" style="margin-bottom: 20px;">
+                <h4>表格配置</h4>
+                <el-row :gutter="20">
+                    <el-col :span="6">
+                        <el-form-item label="初始行数">
+                            <el-input-number v-model="templateCardForm.row_count" :min="1" :max="100" placeholder="行数"></el-input-number>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="6">
+                        <el-form-item label="责任人">
+                            <el-input v-model="templateCardForm.responsible_person" placeholder="责任人姓名"></el-input>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="6">
+                        <el-form-item label="创建日期">
+                            <el-date-picker v-model="templateCardForm.create_date" type="date" placeholder="选择日期" style="width: 100%;"></el-date-picker>
+                        </el-form-item>
+                    </el-col>
+                    <el-col :span="6">
+                        <el-form-item label="状态">
+                            <el-select v-model="templateCardForm.status" placeholder="选择状态" style="width: 100%;">
+                                <el-option label="草稿" value="draft"></el-option>
+                                <el-option label="进行中" value="in_progress"></el-option>
+                                <el-option label="已完成" value="completed"></el-option>
+                            </el-select>
+                        </el-form-item>
+                    </el-col>
+                </el-row>
+            </el-form>
+
+            <!-- 字段选择表格 -->
+            <div style="margin-bottom: 20px;">
+                <h4>选择要显示的字段（作为表格列）</h4>
+                <el-table :data="currentTemplateFields" style="width: 100%" border>
+                    <el-table-column width="60" align="center">
+                        <template slot="header" slot-scope="scope">
+                            <el-checkbox 
+                                v-model="selectAllTemplateFields" 
+                                @change="handleSelectAllTemplateFieldsChange"
+                                :indeterminate="isSelectAllTemplateFieldsIndeterminate">
+                            </el-checkbox>
+                        </template>
+                        <template slot-scope="scope">
+                            <el-checkbox v-model="scope.row.selected" @change="handleTemplateFieldSelectionChange(scope.row)"></el-checkbox>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="display_name" label="字段显示名" width="180" show-overflow-tooltip></el-table-column>
+                    <el-table-column prop="name" label="字段名" width="150" show-overflow-tooltip></el-table-column>
+                    <el-table-column prop="field_type" label="字段类型" width="100">
+                        <template slot-scope="scope">
+                            <el-tag :type="getFieldTypeColor(scope.row.field_type)" size="mini">
+                                {{ getFieldTypeText(scope.row.field_type) }}
+                            </el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="department_name" label="负责部门" width="120">
+                        <template slot-scope="scope">
+                            <el-tag v-if="scope.row.department_name" type="primary" size="mini">{{ scope.row.department_name }}</el-tag>
+                            <span v-else style="color: #999; font-size: 12px;">未分配</span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column prop="is_required" label="必填" width="80" align="center">
+                        <template slot-scope="scope">
+                            <el-tag :type="scope.row.is_required ? 'success' : 'info'" size="mini">
+                                {{ scope.row.is_required ? '是' : '否' }}
+                            </el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="默认值" width="120">
+                        <template slot-scope="scope">
+                            <el-input v-model="scope.row.default_value" size="mini" placeholder="默认值"></el-input>
+                        </template>
+                    </el-table-column>
+                </el-table>
+                <div style="margin-top: 10px; color: #666;">
+                    已选择 {{ selectedTemplateFieldCount }} 个字段作为表格列
+                </div>
+            </div>
+
+            <!-- 数据预览表格 - 预览格式 -->
+            <div v-if="selectedTemplateFieldsForPreview.length > 0" style="margin-bottom: 20px;">
+                <h4>表格结构预览</h4>
+                <el-table :data="[{}]" border style="width: 100%;">
+                    <el-table-column v-for="field in selectedTemplateFieldsForPreview" 
+                                     :key="'preview-' + field.name + '-' + field.id" 
+                                     :label="field.display_name || field.name" 
+                                     :width="getFieldPreviewWidth(field)"
+                                     :min-width="120">
+                        <template slot="header" slot-scope="scope">
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                                <span>{{ field.display_name || field.name }}</span>
+                                <el-tag size="mini" :type="getFieldTypeColor(field.field_type)" style="margin-left: 8px;">
+                                    {{ getFieldTypeText(field.field_type) }}
+                                </el-tag>
+                            </div>
+                        </template>
+                        <template slot-scope="scope">
+                            <div style="display: flex; align-items: center; justify-content: center; height: 40px;">
+                                <el-input v-if="field.field_type === 'text'" 
+                                          size="mini" 
+                                          placeholder="文本输入"
+                                          readonly
+                                          style="width: 90%;">
+                                </el-input>
+                                <el-input-number v-else-if="field.field_type === 'number'" 
+                                               size="mini" 
+                                               placeholder="数字输入"
+                                               readonly
+                                               style="width: 90%;">
+                                </el-input-number>
+                                <el-date-picker v-else-if="field.field_type === 'date'" 
+                                              size="mini" 
+                                              type="date"
+                                              placeholder="日期选择"
+                                              readonly
+                                              style="width: 90%;">
+                                </el-date-picker>
+                                <el-select v-else-if="field.field_type === 'select'" 
+                                          size="mini" 
+                                          placeholder="选择项"
+                                          readonly
+                                          style="width: 90%;">
+                                    <el-option label="选项预览" value="preview"></el-option>
+                                </el-select>
+                                <el-switch v-else-if="field.field_type === 'boolean'" 
+                                           size="mini"
+                                           readonly>
+                                </el-switch>
+                                <span v-else style="color: #999; font-size: 12px;">字段预览</span>
+                            </div>
+                        </template>
+                    </el-table-column>
+                </el-table>
+                <div style="margin-top: 10px; color: #666; font-size: 12px; display: flex; justify-content: space-between;">
+                    <span>💡 表格结构预览：显示 {{ selectedTemplateFieldsForPreview.length }} 个字段列</span>
+                    <span>保存后，用户将按照此表格结构填写数据</span>
+                </div>
+            </div>
+
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="createCardFromTemplateDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveTemplateCardWithTableData">创建流转卡</el-button>
+            </div>
+        </el-dialog>
+
+        <!-- 流转卡详情对话框 -->
+        <el-dialog title="流转卡详情" :visible.sync="cardDetailDialogVisible" width="95%" top="5vh">
+            <div v-if="currentCardDetail">
+                <!-- 基本信息区域 -->
+                <div class="card-info-section">
+                    <h3>基本信息</h3>
+                    <el-descriptions :column="3" border>
+                        <el-descriptions-item label="流转卡号">{{ currentCardDetail.card_number }}</el-descriptions-item>
+                        <el-descriptions-item label="标题">{{ currentCardDetail.title }}</el-descriptions-item>
+                        <el-descriptions-item label="模板">{{ currentCardDetail.template_name }}</el-descriptions-item>
+                        <el-descriptions-item label="状态">
+                            <el-tag :type="getStatusType(currentCardDetail.status)">
+                                {{ getStatusText(currentCardDetail.status) }}
+                            </el-tag>
+                        </el-descriptions-item>
+                        <el-descriptions-item label="创建人">{{ currentCardDetail.creator_name }}</el-descriptions-item>
+                        <el-descriptions-item label="创建时间">{{ formatDateTime(currentCardDetail.created_at) }}</el-descriptions-item>
+                        <el-descriptions-item label="描述" :span="3">{{ currentCardDetail.description || '暂无描述' }}</el-descriptions-item>
+                    </el-descriptions>
+                </div>
+
+                <!-- 数据表格区域 -->
+                <div class="card-data-section" style="margin-top: 20px;">
+                    <div class="section-header">
+                        <h3>数据表格</h3>
+                        <div class="section-actions">
+                            <el-button size="small" @click="addNewRow" v-if="canEditCurrentCard()">
+                                <i class="el-icon-plus"></i> 添加行
+                            </el-button>
+                            <el-button size="small" type="primary" @click="saveCardData" v-if="canEditCurrentCard()">
+                                <i class="el-icon-check"></i> 保存数据
+                            </el-button>
+                        </div>
+                    </div>
+                    
+                    <!-- 数据表格 -->
+                    <el-table :data="cardDataTable" border style="width: 100%;" max-height="400" :show-header="true">
+                        <!-- 行号列 -->
+                        <el-table-column label="行号" width="60" fixed="left">
+                            <template slot-scope="scope">
+                                {{ scope.$index + 1 }}
+                            </template>
+                        </el-table-column>
+                        
+                        <!-- 动态字段列 -->
+                        <el-table-column 
+                            v-for="field in cardDetailFields" 
+                            :key="'card-detail-' + field.name + '-' + field.id" 
+                            :label="field.display_name || field.name" 
+                            :min-width="getFieldColumnWidth(field)"
+                            :prop="field.name"
+                            :class-name="getFieldColumnClass(field) + (canEditField(field) ? '' : ' non-department-field')">
+                            <template slot="header" slot-scope="scope">
+                                <div class="field-header">
+                                    <div class="department-info">{{ field.department_name || '未分配' }}</div>
+                                    <div class="field-name-row">
+                                        <span class="field-name">{{ field.display_name || field.name }}</span>
+                                        <el-tag v-if="field.is_required" size="mini" type="danger" class="required-tag">*</el-tag>
+                                    </div>
+                                </div>
+                            </template>
+                            <template slot-scope="scope">
+                                <div class="field-input">
+                                    <!-- 查看模式：显示纯文本 -->
+                                    <span v-if="isViewMode" class="view-mode-text">
+                                        {{ getFieldDisplayValue(scope.row, field) }}
+                                    </span>
+                                    
+                                    <!-- 编辑模式：显示输入框 -->
+                                    <el-input 
+                                        v-else-if="field.field_type === 'text'" 
+                                        v-model="scope.row[field.name]" 
+                                        size="mini"
+                                        :readonly="!canEditField(field)"
+                                        :placeholder="canEditField(field) ? '请输入' : '无权限'">
+                                    </el-input>
+                                    <el-input-number 
+                                        v-else-if="field.field_type === 'number'" 
+                                        v-model="scope.row[field.name]" 
+                                        size="mini"
+                                        :readonly="!canEditField(field)"
+                                        :placeholder="canEditField(field) ? '请输入数字' : '无权限'"
+                                        style="width: 100%;">
+                                    </el-input-number>
+                                    <el-date-picker 
+                                        v-else-if="field.field_type === 'date'" 
+                                        v-model="scope.row[field.name]" 
+                                        type="date"
+                                        size="mini"
+                                        :readonly="!canEditField(field)"
+                                        placeholder="选择日期"
+                                        style="width: 100%;">
+                                    </el-date-picker>
+                                    <el-select 
+                                        v-else-if="field.field_type === 'select'" 
+                                        v-model="scope.row[field.name]" 
+                                        size="mini"
+                                        :disabled="!canEditField(field)"
+                                        :placeholder="canEditField(field) ? '请选择' : '无权限'"
+                                        style="width: 100%;">
+                                        <el-option v-for="option in getFieldOptions(field)" :key="option" :label="option" :value="option"></el-option>
+                                    </el-select>
+                                    <el-switch 
+                                        v-else-if="field.field_type === 'boolean'" 
+                                        v-model="scope.row[field.name]" 
+                                        size="mini"
+                                        :disabled="!canEditField(field)">
+                                    </el-switch>
+                                    <span v-else style="color: #999;">不支持的字段类型</span>
+                                </div>
+                            </template>
+                        </el-table-column>
+                        
+                        <!-- 操作列 -->
+                        <el-table-column label="操作" width="80" fixed="right" v-if="canEditCurrentCard()">
+                            <template slot-scope="scope">
+                                <el-button 
+                                    size="mini" 
+                                    type="danger" 
+                                    @click="deleteRow(scope.$index)"
+                                    :disabled="cardDataTable.length <= 1">
+                                    删除
+                                </el-button>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </div>
+            </div>
+            
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="closeCardDetailDialog">关闭</el-button>
+                <el-button type="primary" @click="editCardData(currentCardDetail)" v-if="canEditCurrentCard()">
+                    编辑流转卡
+                </el-button>
+            </div>
+        </el-dialog>
+
+        <!-- 流转卡数据编辑对话框 -->
+        <el-dialog title="填写流转卡数据" :visible.sync="cardDataEditDialogVisible" width="90%" top="5vh">
+            <div v-if="currentEditingCard">
+                <!-- 编辑表单 -->
+                <el-form :model="cardDataEditForm" label-width="120px">
+                    <h3>流转卡信息</h3>
+                    <el-row :gutter="20">
+                        <el-col :span="8">
+                            <el-form-item label="流转卡号">
+                                <el-input v-model="currentEditingCard.card_number" disabled></el-input>
+                            </el-form-item>
+                        </el-col>
+                        <el-col :span="8">
+                            <el-form-item label="标题">
+                                <el-input v-model="currentEditingCard.title" disabled></el-input>
+                            </el-form-item>
+                        </el-col>
+                        <el-col :span="8">
+                            <el-form-item label="状态">
+                                <el-select v-model="cardDataEditForm.status" placeholder="选择状态" style="width: 100%;">
+                                    <el-option label="草稿" value="draft"></el-option>
+                                    <el-option label="进行中" value="in_progress"></el-option>
+                                    <el-option label="已完成" value="completed"></el-option>
+                                    <el-option label="已取消" value="cancelled"></el-option>
+                                </el-select>
+                            </el-form-item>
+                        </el-col>
+                    </el-row>
+                    
+                    <h3 style="margin-top: 20px;">数据填写</h3>
+                    <el-table :data="cardDataEditForm.table_data" border style="width: 100%;" :show-header="true">
+                        <el-table-column label="行号" width="60" type="index">
+                            <template slot="header" slot-scope="scope">
+                                <div style="text-align: center; font-weight: 600;">行号</div>
+                            </template>
+                        </el-table-column>
+                        
+                        <el-table-column 
+                            v-for="field in cardDataEditFields" 
+                            :key="'card-edit-' + field.name + '-' + field.id" 
+                            :label="field.display_name || field.name" 
+                            :min-width="getFieldColumnWidth(field)"
+                            :class-name="getFieldColumnClass(field) + (canEditField(field) ? '' : ' non-department-field')">
+                            <template slot="header" slot-scope="scope">
+                                <div class="field-header">
+                                    <div class="department-info">{{ field.department_name || '未分配' }}</div>
+                                    <div class="field-name-row">
+                                        <span class="field-name">{{ field.display_name || field.name }}</span>
+                                        <el-tag v-if="field.is_required" size="mini" type="danger" class="required-tag">*</el-tag>
+                                    </div>
+                                </div>
+                            </template>
+                            <template slot-scope="scope">
+                                <el-input 
+                                    v-if="field.field_type === 'text'" 
+                                    v-model="scope.row[field.name]" 
+                                    size="mini"
+                                    :readonly="!canEditField(field)">
+                                </el-input>
+                                <el-input-number 
+                                    v-else-if="field.field_type === 'number'" 
+                                    v-model="scope.row[field.name]" 
+                                    size="mini"
+                                    :readonly="!canEditField(field)"
+                                    style="width: 100%;">
+                                </el-input-number>
+                                <el-date-picker 
+                                    v-else-if="field.field_type === 'date'" 
+                                    v-model="scope.row[field.name]" 
+                                    type="date"
+                                    size="mini"
+                                    :readonly="!canEditField(field)"
+                                    style="width: 100%;">
+                                </el-date-picker>
+                                <el-select 
+                                    v-else-if="field.field_type === 'select'" 
+                                    v-model="scope.row[field.name]" 
+                                    size="mini"
+                                    :disabled="!canEditField(field)"
+                                    style="width: 100%;">
+                                    <el-option v-for="option in getFieldOptions(field)" :key="option" :label="option" :value="option"></el-option>
+                                </el-select>
+                                <el-switch 
+                                    v-else-if="field.field_type === 'boolean'" 
+                                    v-model="scope.row[field.name]" 
+                                    size="mini"
+                                    :disabled="!canEditField(field)">
+                                </el-switch>
+                            </template>
+                        </el-table-column>
+                    </el-table>
+                </el-form>
+            </div>
+            
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="cardDataEditDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveCardDataEdit">保存</el-button>
+            </div>
+        </el-dialog>
+
+        <!-- 字段管理对话框 -->
+        <el-dialog :title="isFieldEditMode ? '编辑字段' : '新增字段'" :visible.sync="fieldDialogVisible" width="700px">
+            <el-form :model="fieldForm" label-width="120px" ref="fieldForm">
+                <el-form-item label="字段名称">
+                    <el-input v-model="fieldForm.name" disabled>
+                        <template slot="prepend">
+                            <i class="el-icon-info"></i>
+                        </template>
+                    </el-input>
+                    <div style="font-size: 12px; color: #999; margin-top: 5px;">
+                        {{ isFieldEditMode ? '编辑模式：字段名称不可修改' : '新建模式：从预留字段中选择，不可修改' }}
+                    </div>
+                </el-form-item>
+                <el-form-item label="显示名称">
+                    <el-input v-model="fieldForm.display_name"></el-input>
+                </el-form-item>
+                <el-form-item label="字段类型">
+                    <el-select v-model="fieldForm.field_type" style="width: 100%;">
+                        <el-option v-for="type in fieldTypes" :key="type.value" :label="type.label" :value="type.value"></el-option>
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="负责部门">
+                    <el-select v-model="fieldForm.department_name" placeholder="请选择负责部门" style="width: 100%;">
+                        <el-option v-for="dept in departments" :key="dept.name" :label="dept.name" :value="dept.name"></el-option>
+                    </el-select>
+                    <div style="font-size: 12px; color: #999; margin-top: 5px;">选择负责此字段的部门，该部门用户将需要填写此字段信息</div>
+                </el-form-item>
+                <el-form-item label="分类">
+                    <el-input v-model="fieldForm.category"></el-input>
+                </el-form-item>
+                <el-form-item label="是否必填">
+                    <el-switch v-model="fieldForm.is_required"></el-switch>
+                </el-form-item>
+                <el-form-item label="是否隐藏">
+                    <el-switch v-model="fieldForm.is_hidden"></el-switch>
+                    <div style="font-size: 12px; color: #999; margin-top: 5px;">隐藏后，普通用户将无法查看此字段（适用于价格等敏感信息）</div>
+                </el-form-item>
+                <el-form-item label="验证规则">
+                    <el-input v-model="fieldForm.validation_rules" placeholder="例如: required,min:5,max:100"></el-input>
+            </el-form>
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="fieldDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveField">确定</el-button>
+            </div>
+        </el-dialog>
+    </div>
+
+    <script src="https://unpkg.com/vue@2/dist/vue.js"></script>
+    <script src="https://unpkg.com/element-ui/lib/index.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <script src="js/api.js?v=20251201_1124"></script>
+    <script src="js/app.js?v=20251201_1124"></script>
+</body>

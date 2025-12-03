@@ -1,0 +1,22 @@
+{
+  "name": "transfer-card-frontend",
+  "version": "1.0.0",
+  "description": "流转卡系统前端",
+  "main": "index.html",
+  "scripts": {
+    "start": "http-server . -p 8080 -c-1 --cors",
+    "dev": "http-server . -p 8080 -c-1 --cors",
+    "build": "echo 'Build completed - static files are ready'"
+  },
+  "keywords": [
+    "transfer-card",
+    "frontend",
+    "vue",
+    "element-ui"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}

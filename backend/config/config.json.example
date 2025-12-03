@@ -1,0 +1,31 @@
+{
+    "server": {
+        "host": "0.0.0.0",
+        "port": 8080,
+        "thread_pool_size": 8
+    },
+    "database": {
+        "host": "localhost",
+        "port": 3306,
+        "database": "transfer_card_system",
+        "username": "root",
+        "password": "your_password",
+        "charset": "utf8mb4",
+        "connection_pool_size": 10
+    },
+    "jwt": {
+        "secret": "your_jwt_secret_key_here",
+        "expire_hours": 24
+    },
+    "logging": {
+        "level": "info",
+        "file": "logs/transfer_card.log",
+        "max_size": "100MB",
+        "max_files": 10
+    },
+    "cors": {
+        "allowed_origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+        "allowed_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allowed_headers": ["Content-Type", "Authorization"]
+    }
+}

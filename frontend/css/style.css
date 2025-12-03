@@ -1,0 +1,1194 @@
+/* 全局样式 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Microsoft YaHei', Arial, sans-serif;
+    background-color: #f5f5f5;
+}
+
+/* 登录页面样式 */
+.login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.login-card {
+    width: 400px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+}
+
+.login-card .el-card__header {
+    text-align: center;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.login-card h2 {
+    color: #333;
+    font-weight: 500;
+    margin: 0;
+}
+
+/* 主页面样式 */
+.el-header {
+    background-color: #fff;
+    border-bottom: 1px solid #e6e6e6;
+    padding: 0;
+    height: 60px !important;
+    line-height: 60px;
+}
+
+.el-main {
+    padding: 20px;
+    background-color: #f5f5f5;
+    min-height: calc(100vh - 60px);
+}
+
+/* 卡片样式 */
+.el-card {
+    margin-bottom: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.el-card__header {
+    background: #fafafa;
+    border-bottom: 1px solid #ebeef5;
+    font-weight: 500;
+}
+
+/* 表格样式 */
+.el-table {
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.el-table th {
+    background-color: #fafafa;
+    font-weight: 600;
+}
+
+/* 按钮样式 */
+.el-button {
+    border-radius: 4px;
+}
+
+.el-button--primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+}
+
+.el-button--primary:hover {
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+}
+
+/* 表单样式 */
+.el-form-item__label {
+    font-weight: 500;
+}
+
+.el-input__inner,
+.el-textarea__inner {
+    border-radius: 4px;
+}
+
+/* 菜单样式 */
+.el-menu--horizontal > .el-menu-item {
+    height: 60px;
+    line-height: 60px;
+    border-bottom: 2px solid transparent;
+}
+
+.el-menu--horizontal > .el-menu-item.is-active {
+    border-bottom-color: #667eea;
+    color: #667eea;
+}
+
+/* 统计卡片样式 */
+.el-statistic {
+    text-align: center;
+}
+
+.el-statistic .el-statistic__head {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.el-statistic .el-statistic__content {
+    font-size: 28px;
+    font-weight: 600;
+    color: #333;
+}
+
+/* 对话框样式 */
+.el-dialog {
+    border-radius: 8px;
+}
+
+.el-dialog__header {
+    background: #fafafa;
+    border-bottom: 1px solid #ebeef5;
+    border-radius: 8px 8px 0 0;
+}
+
+.el-dialog__title {
+    font-weight: 500;
+}
+
+/* 标签样式 */
+.el-tag {
+    border-radius: 4px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .login-card {
+        width: 90%;
+        margin: 0 20px;
+    }
+    
+    .el-main {
+        padding: 10px;
+    }
+    
+    .el-col {
+        margin-bottom: 20px;
+    }
+}
+
+/* 加载动画 */
+.el-loading-mask {
+    background-color: rgba(255, 255, 255, 0.9);
+}
+
+/* 成功/错误提示样式 */
+.el-message {
+    border-radius: 4px;
+}
+
+.el-message--success {
+    background-color: #f0f9ff;
+    border-color: #b3d8ff;
+}
+
+.el-message--error {
+    background-color: #fef0f0;
+    border-color: #fbc4c4;
+}
+
+/* 分页样式 */
+.el-pagination {
+    text-align: center;
+    margin-top: 20px;
+}
+
+/* 搜索框样式 */
+.search-container {
+    margin-bottom: 20px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.search-container .el-input {
+    max-width: 300px;
+}
+
+/* 状态标签颜色 */
+.status-draft {
+    background-color: #e6a23c;
+    border-color: #d39e00;
+}
+
+.status-in-progress {
+    background-color: #409eff;
+    border-color: #007bff;
+}
+
+.status-completed {
+    background-color: #67c23a;
+    border-color: #28a745;
+}
+
+.status-cancelled {
+    background-color: #f56c6c;
+    border-color: #dc3545;
+}
+
+/* 工具栏样式 */
+.toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 空状态样式 */
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #909399;
+}
+
+.empty-state .el-icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+    color: #c0c4cc;
+}
+
+/* 字段分组样式 */
+.field-group {
+    margin-bottom: 30px;
+    padding: 20px;
+    background: #fff;
+    border-radius: 8px;
+    border: 1px solid #ebeef5;
+}
+
+.field-group-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #667eea;
+}
+
+/* 操作历史样式 */
+.operation-history {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.operation-item {
+    padding: 10px;
+    border-bottom: 1px solid #ebeef5;
+}
+
+.operation-item:last-child {
+    border-bottom: none;
+}
+
+.operation-time {
+    font-size: 12px;
+    color: #909399;
+}
+
+.operation-user {
+    font-weight: 500;
+    color: #409eff;
+}
+
+/* 管理员页面样式 */
+.admin-header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%) !important;
+    border-bottom: 2px solid #1e3a8a !important;
+}
+
+.admin-header .el-menu--horizontal {
+    background: transparent !important;
+}
+
+.admin-header .el-menu--horizontal .el-menu-item {
+    color: #fff !important;
+    border-bottom-color: transparent !important;
+}
+
+.admin-header .el-menu--horizontal .el-menu-item:hover {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    color: #fff !important;
+}
+
+.admin-header .el-menu--horizontal .el-menu-item.is-active {
+    background-color: rgba(255, 255, 255, 0.2) !important;
+    border-bottom-color: #60a5fa !important;
+    color: #60a5fa !important;
+}
+
+.admin-header .el-submenu__title {
+    color: #fff !important;
+    border-bottom-color: transparent !important;
+}
+
+.admin-header .el-submenu__title:hover {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    color: #fff !important;
+}
+
+.admin-page {
+    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+    min-height: calc(100vh - 60px);
+}
+
+.admin-card {
+    background: #fff;
+    border-left: 4px solid #1e3a8a;
+    box-shadow: 0 4px 12px rgba(30, 58, 138, 0.1);
+}
+
+.admin-card .el-card__header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    color: #fff;
+    border-bottom: none;
+}
+
+.admin-card .el-card__body {
+    border: 1px solid #e2e8f0;
+    border-top: none;
+}
+
+.admin-button {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    border: none;
+    color: #fff;
+}
+
+.admin-button:hover {
+    background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(30, 58, 138, 0.2);
+}
+
+.admin-button:active {
+    transform: translateY(0);
+}
+
+.admin-table .el-table__header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+}
+
+.admin-table .el-table__header th {
+    background: transparent !important;
+    color: #fff !important;
+    font-weight: 600;
+}
+
+.admin-table .el-table__body tr:hover > td {
+    background-color: rgba(30, 58, 138, 0.05) !important;
+}
+
+.admin-statistic {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    color: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+}
+
+.admin-statistic .el-statistic__head {
+    color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.admin-statistic .el-statistic__content {
+    color: #fff !important;
+}
+
+/* 管理员登录界面特殊样式 */
+.admin-login .login-container {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+}
+
+.admin-login .login-card {
+    border-left: 4px solid #1e3a8a;
+}
+
+.admin-login .login-card .el-card__header {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    color: #fff;
+    border-bottom: none;
+}
+
+.admin-login .login-card h2 {
+    color: #fff;
+}
+
+.admin-login .el-button--primary {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    border: none;
+}
+
+.admin-login .el-button--primary:hover {
+    background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+}
+
+/* 管理员标签样式 */
+.admin-tag {
+    background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+    border: none;
+    color: #fff;
+}
+
+/* 新增的流转卡管理页面样式 */
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    padding: 20px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.page-title h2 {
+    margin: 0 0 8px 0;
+    color: #333;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.page-title p {
+    margin: 0;
+    color: #666;
+    font-size: 14px;
+}
+
+.page-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.filter-bar {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+.card-list {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.card-list .el-table {
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.empty-state {
+    padding: 60px 20px;
+    text-align: center;
+}
+
+/* 流转卡详情对话框样式 */
+.card-info-section {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border: 1px solid #ebeef5;
+}
+
+.card-info-section h3 {
+    margin: 0 0 20px 0;
+    color: #333;
+    font-size: 18px;
+    font-weight: 600;
+    border-bottom: 2px solid #409eff;
+    padding-bottom: 10px;
+}
+
+.card-data-section {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #ebeef5;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.section-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.section-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.field-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* 查看模式文本样式 - 直接显示在单元格内 */
+.view-mode-text {
+    display: block;
+    color: #606266;
+    font-size: 14px;
+    line-height: 1.5;
+    word-break: break-all;
+    padding: 8px 0;
+    text-align: left;
+}
+
+.field-input {
+    width: 100%;
+}
+
+/* 表格字段宽度调整 */
+.field-column-text {
+    min-width: 200px;
+}
+
+.field-column-number {
+    min-width: 150px;
+}
+
+.field-column-date {
+    min-width: 180px;
+}
+
+.field-column-select {
+    min-width: 150px;
+}
+
+.field-column-boolean {
+    min-width: 100px;
+}
+
+/* 响应式设计优化 */
+@media (max-width: 1200px) {
+    .page-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 15px;
+    }
+    
+    .page-actions {
+        justify-content: flex-start;
+    }
+    
+    .filter-bar .el-row {
+        flex-direction: column;
+    }
+    
+    .filter-bar .el-col {
+        margin-bottom: 10px;
+    }
+}
+
+@media (max-width: 768px) {
+    .page-title h2 {
+        font-size: 20px;
+    }
+    
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .section-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+    
+    .card-list .el-table {
+        font-size: 12px;
+    }
+    
+    .card-info-section,
+    .card-data-section {
+        padding: 15px;
+    }
+}
+
+/* 加载状态优化 */
+.loading-overlay {
+    background-color: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(2px);
+}
+
+/* 表格行悬停效果 */
+.el-table__body tr:hover > td {
+    background-color: #f5f7fa !important;
+}
+
+/* 表格输入框样式优化 */
+.el-table .el-input--mini .el-input__inner {
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.el-table .el-input--mini .el-input__inner:focus {
+    border-color: #409eff;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+/* 对话框内容滚动优化 */
+.el-dialog__body {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+/* 标签组合样式 */
+.field-header .el-tag {
+    margin-left: 4px;
+}
+
+/* 描述列表样式优化 */
+.el-descriptions {
+    margin-bottom: 20px;
+}
+
+.el-descriptions__header {
+    margin-bottom: 20px;
+}
+
+.el-descriptions__title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+}
+
+/* 空状态图片优化 */
+.empty-state .el-empty__image {
+    width: 120px;
+    height: 120px;
+}
+
+.empty-state .el-empty__description {
+    color: #909399;
+    font-size: 14px;
+    margin-bottom: 20px;
+}
+
+/* 快速创建流转卡样式 */
+.create-card-step {
+    margin-bottom: 30px;
+}
+
+.template-card {
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-bottom: 20px;
+    border: 2px solid transparent;
+}
+
+.template-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.template-card.selected {
+    border-color: #409eff;
+    background-color: #f0f9ff;
+}
+
+.template-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.template-card-header h4 {
+    margin: 0;
+    color: #333;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.template-description {
+    color: #666;
+    font-size: 14px;
+    margin-bottom: 15px;
+    min-height: 40px;
+}
+
+.template-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #909399;
+}
+
+.template-info span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.step-actions {
+    text-align: center;
+    margin-top: 30px;
+}
+
+.step-actions .el-button {
+    margin: 0 10px;
+    min-width: 120px;
+}
+
+.template-fields-preview {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #ebeef5;
+    margin-bottom: 20px;
+}
+
+.template-fields-preview h4 {
+    margin: 0 0 20px 0;
+    color: #333;
+    font-size: 16px;
+    font-weight: 600;
+    border-bottom: 2px solid #409eff;
+    padding-bottom: 10px;
+}
+
+/* 步骤条样式优化 */
+.el-steps {
+    margin-bottom: 40px;
+}
+
+.el-step__title {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.el-step__description {
+    font-size: 12px;
+    color: #666;
+}
+
+/* 模板选择网格优化 */
+.el-row .el-col {
+    margin-bottom: 20px;
+}
+
+/* 响应式设计优化 */
+@media (max-width: 768px) {
+    .template-card {
+        margin-bottom: 15px;
+    }
+    
+    .template-card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .template-info {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .step-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .step-actions .el-button {
+        margin: 0;
+        width: 100%;
+    }
+}
+
+/* 加载状态样式 */
+.creating-overlay {
+    position: relative;
+}
+
+.creating-overlay::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 16px;
+    color: #409eff;
+    z-index: 1000;
+}
+
+/* 表单验证提示优化 */
+.el-form-item__error {
+    font-size: 12px;
+    color: #f56c6c;
+}
+
+/* 成功状态动画 */
+@keyframes successPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(64, 158, 255, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(64, 158, 255, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(64, 158, 255, 0);
+    }
+}
+
+.template-card.success-selected {
+    animation: successPulse 2s infinite;
+}
+
+/* 字段权限提示样式 */
+.field-header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 4px 0;
+}
+
+.field-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.field-permission {
+    align-self: flex-end;
+}
+
+.field-permission .el-tag {
+    font-size: 10px;
+    height: 20px;
+    line-height: 18px;
+    padding: 0 6px;
+    border-radius: 10px;
+}
+
+.field-permission .el-tag i {
+    font-size: 10px;
+    margin-right: 2px;
+}
+
+/* 权限提示颜色优化 */
+.field-permission .el-tag--success {
+    background-color: #f0f9ff;
+    border-color: #b3d8ff;
+    color: #1890ff;
+}
+
+.field-permission .el-tag--warning {
+    background-color: #fffbf0;
+    border-color: #ffe7ba;
+    color: #fa8c16;
+}
+
+.field-permission .el-tag--danger {
+    background-color: #fff2f0;
+    border-color: #ffccc7;
+    color: #ff4d4f;
+}
+
+/* 表格字段权限提示样式 */
+.el-table .field-header .field-permission .el-tag {
+    background-color: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(2px);
+    border: 1px solid #e6e6e6;
+    font-weight: 500;
+}
+
+.el-table .field-header .field-permission .el-tag--success {
+    background-color: rgba(240, 249, 255, 0.9);
+    border-color: rgba(179, 216, 255, 0.8);
+    color: #1890ff;
+}
+
+.el-table .field-header .field-permission .el-tag--warning {
+    background-color: rgba(255, 251, 240, 0.9);
+    border-color: rgba(255, 231, 186, 0.8);
+    color: #fa8c16;
+}
+
+/* 只读字段输入框样式 */
+.el-input.is-read-only .el-input__inner,
+.el-input-number.is-read-only .el-input__inner,
+.el-date-editor.is-read-only .el-input__inner,
+.el-select.is-read-only .el-input__inner {
+    background-color: #f5f5f5;
+    color: #999;
+    cursor: not-allowed;
+    border-color: #e6e6e6;
+}
+
+.el-input.is-read-only .el-input__inner:hover,
+.el-input-number.is-read-only .el-input__inner:hover,
+.el-date-editor.is-read-only .el-input__inner:hover,
+.el-select.is-read-only .el-input__inner:hover {
+    border-color: #e6e6e6;
+}
+
+.el-switch.is-read-only {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* 权限提示工具提示样式 */
+.el-tooltip__popper {
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+/* 字段权限图标样式 */
+.field-permission .el-icon-user {
+    color: #1890ff;
+}
+
+.field-permission .el-icon-lock {
+    color: #fa8c16;
+}
+
+/* 响应式权限提示 */
+@media (max-width: 768px) {
+    .field-header {
+        gap: 2px;
+        padding: 2px 0;
+    }
+    
+    .field-title {
+        font-size: 12px;
+    }
+    
+    .field-permission .el-tag {
+        font-size: 9px;
+        height: 18px;
+        line-height: 16px;
+        padding: 0 4px;
+    }
+    
+    .field-permission .el-tag i {
+        font-size: 9px;
+    }
+}
+
+/* 部门提示样式 */
+.department-hint {
+    font-size: 11px;
+    color: #666;
+    background-color: #f0f0f0;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    font-weight: normal;
+    white-space: nowrap;
+    display: inline-block;
+    line-height: 1.2;
+    border: 1px solid #e0e0e0;
+}
+
+/* 部门提示悬停效果 */
+.department-hint:hover {
+    background-color: #e8e8e8;
+    border-color: #d0d0d0;
+    color: #333;
+    transition: all 0.2s ease;
+}
+
+/* 表格头中的部门提示样式优化 */
+.el-table .field-title .department-hint {
+    background-color: rgba(240, 240, 240, 0.8);
+    border-color: rgba(224, 224, 224, 0.8);
+    color: #666;
+    font-size: 10px;
+    padding: 1px 4px;
+    margin-left: 4px;
+}
+
+/* 响应式部门提示 */
+@media (max-width: 768px) {
+    .department-hint {
+        font-size: 9px;
+        padding: 1px 3px;
+        margin-left: 3px;
+    }
+    
+    .el-table .field-title .department-hint {
+        font-size: 8px;
+        padding: 1px 2px;
+        margin-left: 2px;
+    }
+}
+
+/* 部门字段样式 */
+.non-department-field {
+    background-color: #f5f5f5 !important;
+}
+
+.non-department-field .el-input__inner,
+.non-department-field .el-input-number__inner,
+.non-department-field .el-date-editor .el-input__inner,
+.non-department-field .el-select .el-input__inner {
+    background-color: #f8f8f8 !important;
+    color: #999 !important;
+    cursor: not-allowed !important;
+}
+
+.non-department-field .el-input.is-disabled .el-input__inner,
+.non-department-field .el-input-number.is-disabled .el-input__inner,
+.non-department-field .el-date-editor.is-disabled .el-input__inner,
+.non-department-field .el-select.is-disabled .el-input__inner {
+    background-color: #f8f8f8 !important;
+    color: #999 !important;
+}
+
+.non-department-field .el-switch.is-disabled {
+    opacity: 0.5;
+}
+
+/* 部门行样式 - 加深背景色，移除下边框 */
+.el-table__body tr:first-child {
+    background-color: #e8eaf0 !important;
+    font-weight: 600;
+    color: #1a237e;
+}
+
+.el-table__body tr:first-child td {
+    background-color: #e8eaf0 !important;
+    font-weight: 600;
+    color: #1a237e;
+}
+
+/* 不可编辑列样式 - 深色标记 */
+.el-table td.non-department-field {
+    background-color: #f5f5f5 !important;
+}
+
+.el-table td.non-department-field .el-input__inner,
+.el-table td.non-department-field .el-input-number__inner,
+.el-table td.non-department-field .el-date-editor .el-input__inner,
+.el-table td.non-department-field .el-select .el-input__inner {
+    background-color: #e8e8e8 !important;
+    color: #666 !important;
+    cursor: not-allowed !important;
+    border-color: #d0d0d0 !important;
+}
+
+.el-table td.non-department-field .el-input.is-disabled .el-input__inner,
+.el-table td.non-department-field .el-input-number.is-disabled .el-input__inner,
+.el-table td.non-department-field .el-date-editor.is-disabled .el-input__inner,
+.el-table td.non-department-field .el-select.is-disabled .el-input__inner {
+    background-color: #e8e8e8 !important;
+    color: #666 !important;
+}
+
+.el-table td.non-department-field .el-switch.is-disabled {
+    opacity: 0.5;
+}
+
+/* 数据行交替背景色，增强可读性 */
+.el-table__body tr:nth-child(even) {
+    background-color: #f8f9fa !important;
+}
+
+.el-table__body tr:nth-child(even) td {
+    background-color: #f8f9fa !important;
+}
+
+.el-table__body tr:nth-child(odd) {
+    background-color: #ffffff !important;
+}
+
+.el-table__body tr:nth-child(odd) td {
+    background-color: #ffffff !important;
+}
+
+/* 数据行悬停效果加深 */
+.el-table__body tr:hover > td {
+    background-color: #e3f2fd !important;
+}
+
+/* 表头颜色加深 */
+.el-table th {
+    background-color: #e8eaf0 !important;
+    color: #1a237e !important;
+    font-weight: 700;
+}
+
+/* 优化后的字段表头样式 */
+.field-header {
+    text-align: center;
+    padding: 6px 8px;
+    min-height: 50px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.department-info {
+    font-size: 11px;
+    color: #909399;
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+.field-name-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.field-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: #303133;
+}
+
+.required-tag {
+    padding: 0px 4px;
+    height: 16px;
+    line-height: 16px;
+    font-size: 10px;
+}
+
+/* 优化表格整体样式 */
+.el-table th {
+    padding: 6px 0px !important;
+    background-color: #fafafa !important;
+}
+
+.el-table .cell {
+    padding: 6px 8px !important;
+}
+
+/* 权限提示移到输入框旁边 */
+.field-input {
+    position: relative;
+}
+
+.permission-hint {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    font-size: 10px;
+    cursor: help;
+}
