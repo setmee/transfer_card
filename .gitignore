@@ -86,3 +86,13 @@ test_*.py
 # Temporary files
 *.tmp
 *.temp
+
+# Windows Server deployment backups
+backups/
+logs/
+
+# Windows scripts (not needed in Git)
+deploy-windows.bat
+rollback-windows.bat
+manage-services.bat
+backup-windows.bat

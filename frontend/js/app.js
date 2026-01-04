@@ -15,7 +15,230 @@ new Vue({
                 username: '',
                 password: '',
                 department_id: null
-            },
+        },
+
+        // 捕获当前用户编辑的内容
+        captureCurrentUserEdits() {
+            const currentUserEdits = new Map();
+            
+            try {
+                console.log(' 开始捕获当前用户编辑内容');
+                
+                // 查找所有可能的输入框
+                const inputs = document.querySelectorAll(
+                    'input.el-input__inner, ' +
+                    'input[type="text"], ' +
+                    'textarea, ' +
+                    'input:not([type]), ' +
+                    '.el-input input'
+                );
+                
+                console.log(` 找到 ${inputs.length} 个输入框元素`);
+                
+                inputs.forEach((input, index) => {
+                    try {
+                        console.log(` 检查输入框 ${index}:`, {
+                            tagName: input.tagName,
+                            type: input.type,
+                            className: input.className,
+                            value: input.value,
+                            placeholder: input.placeholder
+                        });
+                        
+                        // 获取行号
+                        let rowNumber = null;
+                        
+                        // 方法1：通过父级tr元素获取
+                        const tr = input.closest('tr');
+                        if (tr) {
+                            const allRows = Array.from(tr.parentNode.children);
+                            rowNumber = allRows.indexOf(tr) + 1;
+                            console.log(`📍 通过tr元素获取行号: ${rowNumber}`);
+                        }
+                        
+                        // 方法2：通过data属性获取
+                        if (!rowNumber) {
+                            rowNumber = input.getAttribute('data-row-number') || 
+                                       input.closest('[data-row-number]')?.getAttribute('data-row-number');
+                            if (rowNumber) {
+                                rowNumber = parseInt(rowNumber);
+                                console.log(`📍 通过data属性获取行号: ${rowNumber}`);
+                            }
+                        }
+                        
+                        // 方法3：通过行号列获取
+                        if (!rowNumber) {
+                            const rowNumberCell = tr?.querySelector('td:first-child, .el-table__cell:first-child');
+                            if (rowNumberCell) {
+                                const rowText = rowNumberCell.textContent.trim();
+                                const match = rowText.match(/\d+/);
+                                if (match) {
+                                    rowNumber = parseInt(match[0]);
+                                    console.log(`📍 通过行号列获取行号: ${rowNumber}`);
+                                }
+                            }
+                        }
+                        
+                        // 获取字段名
+                        let fieldName = null;
+                        
+                        // 方法1：通过data属性获取
+                        fieldName = input.getAttribute('data-field-name') || 
+                                  input.closest('[data-field-name]')?.getAttribute('data-field-name');
+                        
+                        // 方法2：通过name属性获取
+                        if (!fieldName && input.name) {
+                            fieldName = input.name;
+                        }
+                        
+                        // 方法3：通过表头获取
+                        if (!fieldName && tr) {
+                            const inputIndex = Array.from(tr.querySelectorAll('input, textarea')).indexOf(input);
+                            const table = tr.closest('table');
+                            if (table && inputIndex >= 0) {
+                                const headers = table.querySelectorAll('th');
+                                if (headers[inputIndex]) {
+                                    fieldName = headers[inputIndex].textContent.trim();
+                                    console.log(`📍 通过表头获取字段名: ${fieldName}`);
+                                }
+                            }
+                        }
+                        
+                        console.log(`📍 输入框 ${index} 解析结果:`, {
+                            rowNumber,
+                            fieldName,
+                            value: input.value
+                        });
+                        
+                        // 如果有值且能识别位置，就记录
+                        if (rowNumber && fieldName && input.value.trim() !== '') {
+                            if (!currentUserEdits.has(rowNumber)) {
+                                currentUserEdits.set(rowNumber, {});
+                            }
+                            currentUserEdits.get(rowNumber)[fieldName] = input.value;
+                            console.log(`  捕获到用户编辑: 行${rowNumber} 字段${fieldName} = "${input.value}"`);
+                        } else {
+                            console.log(`  跳过输入框 ${index}:`, {
+                                hasRowNumber: !!rowNumber,
+                                hasFieldName: !!fieldName,
+                                hasValue: input.value.trim() !== '',
+                                value: input.value
+                            });
+                        }
+                        
+                    } catch (error) {
+                        console.error(` 处理输入框 ${index} 失败:`, error);
+                    }
+                });
+                
+                console.log('🎯 捕获完成，结果:', currentUserEdits);
+                console.log('🎯 捕获的编辑数量:', currentUserEdits.size);
+                
+            } catch (error) {
+                console.error(' 捕获当前用户编辑失败:', error);
+            }
+            
+            return currentUserEdits;
+        },
+
+        // 智能合并服务器数据和当前用户编辑
+        mergeServerAndUserData(serverData, currentUserEdits) {
+            try {
+                const serverTableData = serverData.table_data || [];
+                const mergedData = [];
+                
+                serverTableData.forEach((serverRow, index) => {
+                    const rowNumber = index + 1;
+                    const userEdit = currentUserEdits.get(rowNumber);
+                    
+                    // 创建合并后的行
+                    const mergedRow = { ...serverRow };
+                    
+                    // 如果用户正在编辑这一行，用户编辑内容优先
+                    if (userEdit && Object.keys(userEdit).length > 0) {
+                        mergedRow.values = { ...serverRow.values, ...userEdit };
+                        console.log(`🔒 行${rowNumber}: 用户编辑优先，合并字段:`, Object.keys(userEdit));
+                    }
+                    
+                    mergedData.push(mergedRow);
+                });
+                
+                return mergedData;
+                
+            } catch (error) {
+                console.error(' 合并服务器数据和用户编辑失败:', error);
+                return serverData.table_data || [];
+            }
+        },
+
+        // 恢复用户编辑到输入框
+        restoreUserEdits(currentUserEdits) {
+            try {
+                currentUserEdits.forEach((fields, rowNumber) => {
+                    Object.entries(fields).forEach(([fieldName, value]) => {
+                        const input = this.findInputForRowAndField(rowNumber, fieldName);
+                        if (input && input.value !== value) {
+                            input.value = value;
+                            
+                            // 触发Vue的input事件
+                            const event = new Event('input', { bubbles: true });
+                            input.dispatchEvent(event);
+                            
+                            console.log(` 恢复用户编辑: 行${rowNumber} 字段${fieldName} = "${value}"`);
+                        }
+                    });
+                });
+                
+            } catch (error) {
+                console.error(' 恢复用户编辑失败:', error);
+            }
+        },
+
+        // 检测服务器数据是否有变化
+        detectServerChanges(serverData) {
+            try {
+                if (!this.cardDataEditForm.table_data) {
+                    return true; // 如果没有本地数据，认为有变化
+                }
+                
+                const localData = this.cardDataEditForm.table_data;
+                const serverTableData = serverData.table_data || [];
+                
+                // 检查行数是否变化
+                if (localData.length !== serverTableData.length) {
+                    return true;
+                }
+                
+                // 检查每行是否有变化
+                for (let i = 0; i < serverTableData.length; i++) {
+                    const localRow = localData[i];
+                    const serverRow = serverTableData[i];
+                    
+                    if (!localRow || !serverRow) {
+                        return true;
+                    }
+                    
+                    // 检查字段值是否有变化
+                    const localValues = localRow.values || {};
+                    const serverValues = serverRow.values || {};
+                    
+                    const fields = new Set([...Object.keys(localValues), ...Object.keys(serverValues)]);
+                    
+                    for (const field of fields) {
+                        if (localValues[field] !== serverValues[field]) {
+                            console.log(` 检测到字段变化: 行${i+1} 字段${field} "${localValues[field]}" -> "${serverValues[field]}"`);
+                            return true;
+                        }
+                    }
+                }
+                
+                return false;
+                
+            } catch (error) {
+                console.error(' 检测服务器数据变化失败:', error);
+                return true; // 出错时认为有变化
+            }
+        },
             
             // 登录类型
             loginType: 'user',
@@ -34,11 +257,29 @@ new Vue({
             
             // 工作台数据
             dashboardData: {
-                pendingCards: 0,
-                completedToday: 0,
-                weeklyTotal: 0
+                pendingCards: 5,
+                completedToday: 3,
+                weeklyTotal: 12,
+                totalCards: 28,
+                pendingTrend: 'up',
+                pendingChange: 15,
+                completedTrend: 'down',
+                completedChange: -8,
+                weeklyTrend: 'up',
+                weeklyChange: 12,
+                totalTrend: 'up',
+                totalChange: 5
             },
+            
+            // 静默数据更新（用户无感知）
+            updateInterval: 30000, // 30秒更新一次
+            realTimeUpdateTimer: null,
+            previousData: null,
             recentOperations: [],
+            loadingOperations: false,
+            operationFilter: '',
+            hasMoreOperations: true,
+            currentPage: 1,
             
             // 流转卡数据
             cards: [],
@@ -160,6 +401,14 @@ new Vue({
             selectAllTemplateFields: false,
             isSelectAllTemplateFieldsIndeterminate: false,
             previewTableData: [],
+
+            // 部门流转顺序设置数据
+            flowSettingsDialogVisible: false,
+            flowSettingsTemplate: {},
+            templateFlowDepartments: [],
+            availableDepartmentsForFlow: [],
+            addingDepartmentToFlow: false,
+            newDepartmentForFlow: null,
             
             // 流转卡详情和表格显示相关数据
             templateCards: [],
@@ -209,7 +458,34 @@ new Vue({
                 title: [
                     { required: true, message: '请输入流转卡标题', trigger: 'blur' }
                 ]
-            }
+            },
+            
+            // 简化数据同步相关数据
+            dataSyncEnabled: false,
+            currentEditingCardId: null,
+            lastSyncTime: null,
+            syncStatus: 'stopped', // stopped, running, error
+            syncFrequency: 2000, // 2秒同步一次
+            pendingChanges: {},
+            otherUsersData: new Map(), // 存储其他用户的数据变化
+            
+            
+            // 数据同步相关数据
+            collaborationToken: null,
+            conflictResolution: null,
+            mergedData: null,
+            lastMergeTime: null,
+            syncErrors: [],
+            
+            // 实时同步相关数据
+            realtimeSyncClient: null,
+            realtimeSyncStatus: 'disconnected',
+            realtimeConnectedUsers: new Map(),
+            realtimeChangeQueue: [],
+            realtimeSyncTimer: null,
+            realtimeSyncFrequency: 3000, // 3秒同步一次
+            realtimeLastSyncTime: null,
+            realtimeSyncErrors: []
         };
     },
     
@@ -326,6 +602,21 @@ new Vue({
         this.loadPublicDepartments();
     },
 
+    mounted() {
+        // 启动实时数据更新
+        this.startRealTimeUpdates();
+        
+        // 初始化数据同步
+        this.$nextTick(() => {
+            this.initializeDataSync();
+        });
+    },
+
+    beforeDestroy() {
+        // 清理定时器
+        this.stopRealTimeUpdates();
+    },
+
     watch: {
         fieldSearchKeyword() {
             this.updateFilteredTemplateFields();
@@ -368,23 +659,23 @@ new Vue({
                 const response = await TransferCardAPI.user.getCurrentUser();
                 if (response.success) {
                     this.currentUser = response.data;
-                    console.log('✅用户信息已更新', response.data);
+                    console.log('用户信息已更新', response.data);
                 } else {
-                    console.error('❌用户信息获取失败:', response.message);
+                    console.error('用户信息获取失败:', response.message);
                 }
             } catch (error) {
-                console.error('❌加载用户信息失败:', error);
+                console.error('加载用户信息失败:', error);
             }
         },
         
         // 登录
         async login() {
             try {
-                console.log('🚀 开始登录流程..');
+                console.log(' 开始登录流程..');
                 const valid = await this.$refs.loginForm.validate();
                 if (!valid) return;
                 
-                console.log('📝 登录参数:', {
+                console.log(' 登录参数:', {
                     username: this.loginForm.username,
                     loginType: this.loginType,
                     department_id: this.loginForm.department_id
@@ -401,13 +692,13 @@ new Vue({
                 
                 if (response.success) {
                     TransferCardAPI.setAuthToken(response.token);
-                    console.log('✅Token已保存', response.token);
+                    console.log('Token已保存', response.token);
                     
                     this.currentUser = response.data;
-                    console.log('✅用户信息已设置', this.currentUser);
+                    console.log('用户信息已设置', this.currentUser);
                     
                     this.isLoggedIn = true;
-                    console.log('✅登录状态已更新:', this.isLoggedIn);
+                    console.log('登录状态已更新:', this.isLoggedIn);
                     
                     this.activeMenu = 'dashboard';
                     
@@ -419,14 +710,14 @@ new Vue({
                     }
                     
                     this.$nextTick(() => {
-                        console.log('✅Vue视图已更新');
+                        console.log('Vue视图已更新');
                         this.$forceUpdate();
                     });
                 } else {
                     this.$message.error(response.message || '登录失败');
                 }
             } catch (error) {
-                console.error('❌登录失败:', error);
+                console.error('登录失败:', error);
             }
         },
         
@@ -482,22 +773,60 @@ new Vue({
         // 加载工作台数据
         async loadDashboardData() {
             try {
+                console.log(' 开始加载工作台数据...');
+                
+                // 调用后端API获取统计数据
+                const response = await TransferCardAPI.dashboard.getStats();
+                console.log('📡 工作台数据API响应:', response);
+                
+                if (response.success) {
+                    this.dashboardData = response.data;
+                    console.log(' 工作台数据加载成功:', this.dashboardData);
+                } else {
+                    console.error(' 工作台数据API返回失败:', response.message);
+                    this.$message.error(response.message || '加载工作台数据失败');
+                    
+                    // 使用默认数据作为后备
+                    this.dashboardData = {
+                        pendingCards: 0,
+                        completedToday: 0,
+                        weeklyTotal: 0,
+                        totalCards: 0,
+                        pendingTrend: 'up',
+                        pendingChange: 0,
+                        completedTrend: 'up',
+                        completedChange: 0,
+                        weeklyTrend: 'up',
+                        weeklyChange: 0,
+                        totalTrend: 'up',
+                        totalChange: 0
+                    };
+                }
+                
+                // 加载最近操作记录
+                this.loadRecentOperations();
+            } catch (error) {
+                console.error(' 加载工作台数据失败:', error);
+                this.$message.error('加载工作台数据失败，请检查网络连接');
+                
+                // 使用默认数据作为后备
                 this.dashboardData = {
-                    pendingCards: 5,
-                    completedToday: 3,
-                    weeklyTotal: 12
+                    pendingCards: 0,
+                    completedToday: 0,
+                    weeklyTotal: 0,
+                    totalCards: 0,
+                    pendingTrend: 'up',
+                    pendingChange: 0,
+                    completedTrend: 'up',
+                    completedChange: 0,
+                    weeklyTrend: 'up',
+                    weeklyChange: 0,
+                    totalTrend: 'up',
+                    totalChange: 0
                 };
                 
-                this.recentOperations = [
-                    {
-                        card_number: 'TC001',
-                        action: '编辑',
-                        description: '更新物料信息',
-                        created_at: new Date().toLocaleString()
-                    }
-                ];
-            } catch (error) {
-                console.error('加载工作台数据失败', error);
+                // 仍然尝试加载操作记录
+                this.loadRecentOperations();
             }
         },
         
@@ -655,23 +984,23 @@ new Vue({
         // 加载字段列表
         async loadFields() {
             try {
-                console.log('🔍 开始加载字段列表..');
+                console.log(' 开始加载字段列表..');
                 const response = await TransferCardAPI.field.getFields();
-                console.log('🔍 字段API响应:', response);
+                console.log(' 字段API响应:', response);
                 
                 if (response.success) {
                     this.fields = response.data || response.fields || [];
-                    console.log('✅字段列表已加载', this.fields);
+                    console.log('字段列表已加载', this.fields);
                     
                     this.$nextTick(() => {
                         this.$forceUpdate();
                     });
                 } else {
-                    console.error('❌字段API返回失败:', response.message);
+                    console.error('字段API返回失败:', response.message);
                     this.$message.error(response.message || '加载字段列表失败');
                 }
             } catch (error) {
-                console.error('❌加载字段列表失败:', error);
+                console.error('加载字段列表失败:', error);
                 this.$message.error('加载字段列表失败，请检查网络连接');
             }
         },
@@ -719,7 +1048,7 @@ new Vue({
                     
                     this.templates = templates;
                     
-                    console.log('✅模板列表已加载，状态已初始化', templates.map(t => ({
+                    console.log('模板列表已加载，状态已初始化', templates.map(t => ({
                         name: t.template_name,
                         is_active: t.is_active,
                         type: typeof t.is_active
@@ -781,7 +1110,7 @@ new Vue({
                     this.$message.error(response.message || '保存失败');
                 }
             } catch (error) {
-                console.error('❌保存模板失败:', error);
+                console.error('保存模板失败:', error);
                 this.$message.error('保存失败，请检查网络连接');
             }
         },
@@ -820,7 +1149,7 @@ new Vue({
             const originalStatus = template.is_active;
             
             try {
-                console.log('🔄 状态变更 - 模板:', template.template_name, '新状态:', template.is_active);
+                console.log(' 状态变更 - 模板:', template.template_name, '新状态:', template.is_active);
                 
                 const response = await TransferCardAPI.template.updateTemplate(template.id, {
                     is_active: template.is_active
@@ -1316,10 +1645,72 @@ new Vue({
         // 检查是否可以编辑流转卡
         canEditCard(card) {
             if (!this.currentUser) return false;
+            
+            // 已完成的流转卡不能编辑（管理员除外）
+            if (card.status === 'completed' || card.status === 'cancelled') {
+                return this.currentUser.role === 'admin';
+            }
+            
             // 管理员可以编辑所有流转卡
             if (this.currentUser.role === 'admin') return true;
             // 普通用户可以填写数据
             return true;
+        },
+
+        // 检查是否可以重启流转卡（仅管理员）
+        canRestartCard(card) {
+            if (!this.currentUser) return false;
+            // 只有管理员可以重启流转卡
+            if (this.currentUser.role !== 'admin') return false;
+            // 只有已完成或已驳回的流转卡可以重启
+            return card.status === 'completed' || card.status === 'rejected';
+        },
+
+        // 管理员重启流转卡
+        async restartCard(card) {
+            try {
+                if (!this.currentUser || this.currentUser.role !== 'admin') {
+                    this.$message.warning('只有管理员可以重启流转卡');
+                    return;
+                }
+
+                await this.$confirm('确定要重启此流转卡吗？\n重启后，流转卡将重新开始流转，当前进度将被重置。', '确认重启', {
+                    confirmButtonText: '确定重启',
+                    cancelButtonText: '取消',
+                    type: 'warning'
+                });
+
+                // 询问要流转到哪个部门
+                const { value: departmentId } = await this.$prompt('请输入要流转到的部门ID（留空则流转到第一个部门）', '选择流转部门', {
+                    confirmButtonText: '确定',
+                    cancelButtonText: '取消',
+                    inputPlaceholder: '例如：1'
+                });
+
+                const restartData = {};
+                if (departmentId && departmentId.trim() !== '') {
+                    restartData.department_id = parseInt(departmentId.trim());
+                }
+
+                console.log(' 重启流转卡:', {
+                    cardId: card.id,
+                    departmentId: restartData.department_id
+                });
+
+                const response = await TransferCardAPI.flow.restartCardFlow(card.id, restartData);
+
+                if (response.success) {
+                    this.$message.success(response.message || '流转卡已重启');
+                    this.loadTemplateCards();
+                } else {
+                    this.$message.error(response.message || '重启失败');
+                }
+            } catch (error) {
+                if (error !== 'cancel') {
+                    console.error(' 重启流转卡失败:', error);
+                    this.$message.error('重启失败，请检查网络连接');
+                }
+            }
         },
 
         // 检查是否可以删除流转卡
@@ -1329,6 +1720,15 @@ new Vue({
             if (this.currentUser.role === 'admin') return true;
             // 普通用户不能删除流转卡
             return false;
+        },
+
+        // 检查是否可以创建流转卡
+        canCreateCard() {
+            if (!this.currentUser) return false;
+            // 管理员可以创建流转卡
+            if (this.currentUser.role === 'admin') return true;
+            // 普通用户也可以创建流转卡
+            return true;
         },
 
         // 查看流转卡详情
@@ -1389,7 +1789,7 @@ new Vue({
         // 保存部门 - 修复版本
         async saveDepartment() {
             try {
-                console.log('🚀 开始保存部门:', this.departmentForm);
+                console.log(' 开始保存部门:', this.departmentForm);
                 
                 let response;
                 if (this.isDepartmentEditMode) {
@@ -1410,7 +1810,7 @@ new Vue({
                     this.$message.error(response.message || '保存失败');
                 }
             } catch (error) {
-                console.error('❌ 保存部门失败:', error);
+                console.error(' 保存部门失败:', error);
                 this.$message.error('保存失败，请检查网络连接');
             }
         },
@@ -1560,13 +1960,13 @@ new Vue({
         updatePreviewTableData() {
             const selectedFields = this.selectedTemplateFieldsForPreview;
             
-            console.log('🔄 更新表格结构预览，选中字段数量:', selectedFields.length);
-            console.log('🔄 选中字段:', selectedFields);
+            console.log(' 更新表格结构预览，选中字段数量:', selectedFields.length);
+            console.log(' 选中字段:', selectedFields);
             
             // 预览模式不需要真实数据，只生成空行用于显示结构
             this.previewTableData = [{}];
             
-            console.log('🔄 表格结构预览已生成，字段数量:', selectedFields.length);
+            console.log(' 表格结构预览已生成，字段数量:', selectedFields.length);
             
             // 强制更新视图
             this.$nextTick(() => {
@@ -1732,6 +2132,8 @@ new Vue({
         // 编辑流转卡数据
         async editCardData(card) {
             try {
+                console.log(' 开始编辑流转卡数据:', card);
+                
                 this.currentEditingCard = { ...card };
                 this.cardDataEditForm = {
                     status: card.status,
@@ -1740,9 +2142,14 @@ new Vue({
                 
                 // 加载流转卡字段和数据
                 await this.loadCardEditData(card.id);
+                
                 this.cardDataEditDialogVisible = true;
+                
+                console.log(' 流转卡编辑对话框已打开');
+                console.log('📊 当前编辑的流转卡ID:', card.id);
+                
             } catch (error) {
-                console.error('加载编辑数据失败:', error);
+                console.error(' 加载编辑数据失败:', error);
                 this.$message.error('加载编辑数据失败');
             }
         },
@@ -1788,10 +2195,24 @@ new Vue({
                     table_data: this.cardDataEditForm.table_data
                 };
 
+                // 如果启用了协作，先广播变化
+                if (this.isCollaborationEnabled) {
+                    this.broadcastDataChange('save_pending', updateData);
+                }
+
                 const response = await TransferCardAPI.card.updateCardData(this.currentEditingCard.id, updateData);
                 
                 if (response.success) {
                     this.$message.success('数据保存成功');
+                    
+                    // 如果启用了协作，通知其他用户数据已保存
+                    if (this.isCollaborationEnabled) {
+                        this.broadcastDataChange('save_complete', {
+                            timestamp: new Date().toISOString(),
+                            data: updateData
+                        });
+                    }
+                    
                     this.cardDataEditDialogVisible = false;
                     this.loadTemplateCards(); // 刷新列表
                 } else {
@@ -1877,7 +2298,7 @@ new Vue({
 
         // 格式化字段值显示
         formatFieldValue(value, fieldType) {
-            // console.log(`🔍 格式化字段值:`, { value, fieldType, valueType: typeof value });
+            // console.log(` 格式化字段值:`, { value, fieldType, valueType: typeof value });
             
             if (value === null || value === undefined) {
                 return '';
@@ -2066,6 +2487,1957 @@ new Vue({
         handleMenuChange(newMenu) {
             if (newMenu !== 'create-card') {
                 this.resetQuickCreateForm();
+            }
+        },
+
+        // ========== 工作台页面相关方法 ==========
+
+        // 计算属性：筛选后的操作记录
+        filteredRecentOperations() {
+            let filtered = this.recentOperations || [];
+            
+            // 按操作类型筛选
+            if (this.operationFilter) {
+                filtered = filtered.filter(op => op.action === this.operationFilter);
+            }
+            
+            return filtered;
+        },
+
+        // 加载最近操作记录
+        async loadRecentOperations() {
+            this.loadingOperations = true;
+            try {
+                console.log(' 加载最近操作记录，页面:', this.currentPage);
+                
+                // 调用后端API获取操作记录
+                const response = await TransferCardAPI.dashboard.getOperations({
+                    page: this.currentPage,
+                    per_page: 10
+                });
+                
+                console.log('📡 操作记录API响应:', response);
+                
+                if (response.success) {
+                    const operations = response.data.operations || [];
+                    
+                    // 合并新数据（分页加载）
+                    if (this.currentPage === 1) {
+                        this.recentOperations = operations;
+                    } else {
+                        this.recentOperations = [...this.recentOperations, ...operations];
+                    }
+                    
+                    // 检查是否还有更多数据
+                    this.hasMoreOperations = operations.length === 10 && 
+                                          (response.data.total === undefined || 
+                                           this.recentOperations.length < response.data.total);
+                    
+                    console.log(' 操作记录加载成功，当前数量:', this.recentOperations.length);
+                } else {
+                    console.error(' 操作记录API返回失败:', response.message);
+                    this.$message.error(response.message || '加载操作记录失败');
+                    
+                    // 如果API失败，使用空数据
+                    if (this.currentPage === 1) {
+                        this.recentOperations = [];
+                    }
+                    this.hasMoreOperations = false;
+                }
+                
+            } catch (error) {
+                console.error(' 加载最近操作失败:', error);
+                this.$message.error('加载操作记录失败，请检查网络连接');
+                
+                // 如果发生错误，清空数据
+                if (this.currentPage === 1) {
+                    this.recentOperations = [];
+                }
+                this.hasMoreOperations = false;
+            } finally {
+                this.loadingOperations = false;
+            }
+        },
+
+        // 刷新最近操作
+        refreshRecentOperations() {
+            this.currentPage = 1;
+            this.loadRecentOperations();
+        },
+
+        // 加载更多操作记录
+        loadMoreOperations() {
+            this.currentPage++;
+            this.loadRecentOperations();
+        },
+
+        // 格式化操作时间
+        formatOperationTime(timeStr) {
+            if (!timeStr) return '';
+            
+            try {
+                const now = new Date();
+                const time = new Date(timeStr);
+                const diff = now - time;
+                
+                // 小于1分钟
+                if (diff < 1000 * 60) {
+                    return '刚刚';
+                }
+                
+                // 小于1小时
+                if (diff < 1000 * 60 * 60) {
+                    const minutes = Math.floor(diff / (1000 * 60));
+                    return `${minutes}分钟前`;
+                }
+                
+                // 小于1天
+                if (diff < 1000 * 60 * 60 * 24) {
+                    const hours = Math.floor(diff / (1000 * 60 * 60));
+                    return `${hours}小时前`;
+                }
+                
+                // 小于7天
+                if (diff < 1000 * 60 * 60 * 24 * 7) {
+                    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                    return `${days}天前`;
+                }
+                
+                // 显示具体日期
+                return time.toLocaleDateString('zh-CN');
+                
+            } catch (error) {
+                return timeStr;
+            }
+        },
+
+        // 获取用户头像
+        getUserAvatar(userName) {
+            // 使用简单的头像生成服务，实际应该使用用户头像
+            return `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=random&size=40`;
+        },
+
+        // 获取用户状态
+        getUserStatus(userName) {
+            // 模拟用户在线状态，实际应该根据用户活动时间判断
+            const activeUsers = ['张三', '李四', '王五'];
+            const busyUsers = ['赵六'];
+            
+            if (activeUsers.includes(userName)) {
+                return 'online';
+            } else if (busyUsers.includes(userName)) {
+                return 'busy';
+            } else {
+                return 'offline';
+            }
+        },
+
+        // 获取操作类型样式类
+        getActionTypeClass(action) {
+            return action || '';
+        },
+
+        // 获取部门标签类型
+        getDepartmentTagType(departmentName) {
+            const typeMap = {
+                '研发部': 'primary',
+                '采购部': 'success',
+                '销售部': 'warning',
+                '生产部': 'danger',
+                '质检部': 'info',
+                '仓库部': ''
+            };
+            return typeMap[departmentName] || '';
+        },
+
+        // 处理快捷操作
+        handleQuickAction(action) {
+            switch (action) {
+                case 'create':
+                    this.activeMenu = 'create-card';
+                    break;
+                case 'view':
+                    this.activeMenu = 'cards';
+                    break;
+                case 'manage':
+                    this.activeMenu = 'template-management';
+                    break;
+                case 'report':
+                    this.$message.info('数据统计功能开发中...');
+                    break;
+            }
+        },
+
+        // ========== 实时数据更新方法 ==========
+
+        // 启动实时数据更新
+        startRealTimeUpdates() {
+            // 清除现有定时器
+            this.stopRealTimeUpdates();
+
+            console.log(' 启动自动数据更新，间隔:', this.updateInterval / 1000, '秒');
+
+            // 立即执行一次更新
+            this.performRealTimeUpdate();
+
+            // 设置定时更新
+            this.realTimeUpdateTimer = setInterval(() => {
+                this.performRealTimeUpdate();
+            }, this.updateInterval);
+        },
+
+        // 停止实时数据更新
+        stopRealTimeUpdates() {
+            if (this.realTimeUpdateTimer) {
+                clearInterval(this.realTimeUpdateTimer);
+                this.realTimeUpdateTimer = null;
+                console.log('⏹️ 停止实时数据更新');
+            }
+        },
+
+        // 执行实时数据更新
+        async performRealTimeUpdate() {
+            if (!this.isLoggedIn || !this.currentUser) {
+                return;
+            }
+
+            try {
+                this.isUpdating = true;
+                console.log(' 执行实时数据更新:', new Date().toLocaleTimeString());
+                
+                // 只在工作台页面更新统计数据
+                if (this.activeMenu === 'dashboard') {
+                    await this.updateDashboardStats();
+                }
+                
+                // 在流转卡页面更新流转卡列表
+                if (this.activeMenu === 'cards') {
+                    await this.updateCardLists();
+                }
+                
+                this.lastUpdateTime = new Date();
+                
+            } catch (error) {
+                console.error(' 实时数据更新失败:', error);
+                // 静默失败，不显示错误信息
+            } finally {
+                this.isUpdating = false;
+            }
+        },
+
+        // 更新工作台统计数据
+        async updateDashboardStats() {
+            try {
+                const response = await TransferCardAPI.dashboard.getStats();
+                if (response.success) {
+                    const oldData = { ...this.dashboardData };
+                    this.dashboardData = response.data;
+                    
+                    // 检查数据是否有变化，如果有变化则显示提示
+                    this.checkForDataChanges(oldData, this.dashboardData);
+                    
+                    console.log(' 工作台数据已更新:', this.dashboardData);
+                }
+            } catch (error) {
+                console.error('更新工作台统计数据失败:', error);
+            }
+        },
+
+        // 更新流转卡列表
+        async updateCardLists() {
+            try {
+                // 同时更新普通流转卡和模板流转卡列表
+                await Promise.all([
+                    this.loadCards(),
+                    this.loadTemplateCards()
+                ]);
+                console.log(' 流转卡列表已更新');
+            } catch (error) {
+                console.error('更新流转卡列表失败:', error);
+            }
+        },
+
+        // 静默检测数据变化
+        checkForDataChanges(oldData, newData) {
+            let changeCount = 0;
+            
+            // 检查各项统计指标的变化
+            if (oldData.pendingCards !== newData.pendingCards) changeCount++;
+            if (oldData.totalCards !== newData.totalCards) changeCount++;
+            if (oldData.completedToday !== newData.completedToday) changeCount++;
+            if (oldData.weeklyTotal !== newData.weeklyTotal) changeCount++;
+            
+            // 静默记录变化，不显示UI提示
+            if (changeCount > 0) {
+                console.log(`📊 静默检测到 ${changeCount} 项数据变化`);
+            }
+        },
+
+        // ========== 协作编辑方法 ==========
+
+        // 初始化简化数据同步
+        initializeDataSync() {
+            try {
+                console.log(' 初始化数据同步...');
+                
+                if (!window.simpleDataSync) {
+                    console.warn(' 数据同步模块未找到，跳过初始化');
+                    return;
+                }
+                
+                // 设置数据同步回调
+                window.simpleDataSync.on('onDataChange', (mergedData) => {
+                    console.log(' 收到数据同步更新:', mergedData);
+                    this.handleDataSyncChange(mergedData);
+                });
+                
+                window.simpleDataSync.on('onSyncStart', () => {
+                    this.syncStatus = 'running';
+                });
+                
+                window.simpleDataSync.on('onSyncComplete', () => {
+                    this.syncStatus = 'stopped';
+                    this.lastSyncTime = new Date();
+                });
+                
+                window.simpleDataSync.on('onError', (error) => {
+                    console.error(' 数据同步错误:', error);
+                    this.syncStatus = 'error';
+                });
+                
+                console.log(' 数据同步初始化完成');
+                
+            } catch (error) {
+                console.error(' 初始化数据同步失败:', error);
+                this.$message.error('数据同步功能初始化失败');
+            }
+        },
+
+        // 加入流转卡协作编辑
+        async joinCardCollaboration(cardId) {
+            try {
+                if (!this.collaborationClient || !this.currentUser) {
+                    this.$message.warning('协作功能未可用');
+                    return false;
+                }
+                
+                console.log(' 加入流转卡协作:', cardId);
+                this.collaborationStatus = 'connecting';
+                this.currentEditingCardId = cardId;
+                
+                const result = await this.collaborationClient.joinCard(cardId, {
+                    userId: this.currentUser.id,
+                    userName: this.currentUser.real_name || this.currentUser.username,
+                    department: this.currentUser.department_name,
+                    role: this.currentUser.role
+                });
+                
+                if (result.success) {
+                    this.isCollaborationEnabled = true;
+                    this.activeUsers = result.activeUsers || [];
+                    console.log(' 成功加入协作编辑');
+                    return true;
+                } else {
+                    this.$message.error(result.message || '加入协作失败');
+                    return false;
+                }
+                
+            } catch (error) {
+                console.error(' 加入协作编辑失败:', error);
+                this.$message.error('加入协作编辑失败');
+                return false;
+            }
+        },
+
+        // 离开流转卡协作编辑
+        leaveCardCollaboration() {
+            try {
+                if (!this.collaborationClient) {
+                    return;
+                }
+                
+                console.log(' 离开流转卡协作:', this.currentEditingCardId);
+                
+                this.collaborationClient.leaveCard(this.currentEditingCardId);
+                this.isCollaborationEnabled = false;
+                this.currentEditingCardId = null;
+                this.activeUsers = [];
+                this.stopAutoSave();
+                
+                console.log(' 已离开协作编辑');
+                
+            } catch (error) {
+                console.error(' 离开协作编辑失败:', error);
+            }
+        },
+
+        // 处理协作数据变化
+        handleCollaborationDataChange(data) {
+            try {
+                console.log(' 处理协作数据变化:', data);
+                
+                if (!this.currentEditingCardId || data.cardId !== this.currentEditingCardId) {
+                    return;
+                }
+                
+                // 更新本地数据
+                if (data.type === 'cell_change') {
+                    this.updateCellData(data.rowIndex, data.fieldName, data.value, data.userId);
+                } else if (data.type === 'row_add') {
+                    this.addRemoteRow(data.rowData, data.rowIndex);
+                } else if (data.type === 'row_delete') {
+                    this.deleteRemoteRow(data.rowIndex);
+                } else if (data.type === 'full_sync') {
+                    this.handleFullSync(data.data);
+                }
+                
+                this.lastSyncTime = new Date();
+                
+            } catch (error) {
+                console.error(' 处理协作数据变化失败:', error);
+            }
+        },
+
+        // 更新单元格数据
+        updateCellData(rowIndex, fieldName, value, remoteUserId) {
+            try {
+                // 如果是其他用户的更改，更新本地数据但不触发广播
+                if (remoteUserId !== this.currentUser.id) {
+                    if (this.cardDataTable && this.cardDataTable[rowIndex]) {
+                        this.$set(this.cardDataTable[rowIndex], fieldName, value);
+                        
+                        // 显示用户正在编辑的指示器
+                        this.showEditIndicator(rowIndex, fieldName, remoteUserId);
+                    }
+                }
+                
+            } catch (error) {
+                console.error(' 更新单元格数据失败:', error);
+            }
+        },
+
+        // 添加远程行
+        addRemoteRow(rowData, rowIndex) {
+            try {
+                if (this.cardDataTable) {
+                    this.cardDataTable.splice(rowIndex, 0, rowData);
+                    this.$message.info('其他用户添加了新行');
+                }
+            } catch (error) {
+                console.error(' 添加远程行失败:', error);
+            }
+        },
+
+        // 删除远程行
+        deleteRemoteRow(rowIndex) {
+            try {
+                if (this.cardDataTable && this.cardDataTable.length > 1) {
+                    this.cardDataTable.splice(rowIndex, 1);
+                    this.$message.info('其他用户删除了一行');
+                }
+            } catch (error) {
+                console.error(' 删除远程行失败:', error);
+            }
+        },
+
+        // 处理完整同步
+        handleFullSync(serverData) {
+            try {
+                console.log(' 执行完整数据同步');
+                this.cardDataTable = serverData;
+                this.$message.success('数据已同步到最新状态');
+            } catch (error) {
+                console.error(' 完整同步失败:', error);
+            }
+        },
+
+        // 显示编辑指示器
+        showEditIndicator(rowIndex, fieldName, userId) {
+            // 这里可以添加视觉指示器，显示哪个用户正在编辑哪个单元格
+            const user = this.activeUsers.find(u => u.id === userId);
+            if (user) {
+                console.log(`👤 ${user.name} 正在编辑第${rowIndex + 1}行 ${fieldName} 字段`);
+            }
+        },
+
+        // 处理协作冲突
+        handleCollaborationConflict(conflict) {
+            try {
+                console.log(' 处理协作冲突:', conflict);
+                
+                // 显示冲突解决对话框
+                this.$confirm(`检测到数据冲突：${conflict.message}`, '协作冲突', {
+                    confirmButtonText: '使用我的数据',
+                    cancelButtonText: '使用服务器数据',
+                    type: 'warning'
+                }).then(() => {
+                    // 用户选择保留自己的数据
+                    this.resolveConflict(conflict.id, 'local');
+                }).catch(() => {
+                    // 用户选择使用服务器数据
+                    this.resolveConflict(conflict.id, 'server');
+                });
+                
+            } catch (error) {
+                console.error(' 处理协作冲突失败:', error);
+            }
+        },
+
+        // 解决冲突
+        resolveConflict(conflictId, resolution) {
+            try {
+                if (!this.collaborationClient) {
+                    return;
+                }
+                
+                this.collaborationClient.resolveConflict(conflictId, resolution);
+                this.conflictResolution = null;
+                
+            } catch (error) {
+                console.error(' 解决冲突失败:', error);
+            }
+        },
+
+        // 广播数据变化
+        broadcastDataChange(type, data) {
+            try {
+                if (!this.collaborationClient || !this.isCollaborationEnabled) {
+                    return;
+                }
+                
+                this.collaborationClient.broadcastChange({
+                    type: type,
+                    cardId: this.currentEditingCardId,
+                    userId: this.currentUser.id,
+                    data: data
+                });
+                
+            } catch (error) {
+                console.error(' 广播数据变化失败:', error);
+            }
+        },
+
+        // 启动自动保存
+        startAutoSave() {
+            try {
+                this.stopAutoSave();
+                
+                this.autoSaveTimer = setInterval(() => {
+                    this.autoSave();
+                }, 5000); // 每5秒自动保存
+                
+                console.log(' 自动保存已启动');
+                
+            } catch (error) {
+                console.error(' 启动自动保存失败:', error);
+            }
+        },
+
+        // 停止自动保存
+        stopAutoSave() {
+            if (this.autoSaveTimer) {
+                clearInterval(this.autoSaveTimer);
+                this.autoSaveTimer = null;
+                console.log('⏹️ 自动保存已停止');
+            }
+        },
+
+        // 自动保存
+        async autoSave() {
+            try {
+                if (!this.isCollaborationEnabled || !this.currentEditingCardId) {
+                    return;
+                }
+                
+                // 检查是否有待保存的更改
+                if (Object.keys(this.pendingChanges).length === 0) {
+                    return;
+                }
+                
+                console.log('💾 执行自动保存');
+                
+                // 这里调用保存API
+                await this.saveCardData();
+                
+                // 清空待保存的更改
+                this.pendingChanges = {};
+                
+            } catch (error) {
+                console.error(' 自动保存失败:', error);
+            }
+        },
+
+        // 修改后的保存流转卡数据方法（带协作功能）
+        async saveCardDataWithCollaboration() {
+            try {
+                if (!this.currentCardDetail || !this.currentCardDetail.id) {
+                    this.$message.error('流转卡信息不完整');
+                    return;
+                }
+
+                // 如果启用了协作，先广播变化
+                if (this.isCollaborationEnabled) {
+                    this.broadcastDataChange('full_sync', {
+                        table_data: this.cardDataTable
+                    });
+                }
+
+                // 直接使用cardDataTable，不再需要过滤部门行
+                const updateData = {
+                    table_data: this.cardDataTable
+                };
+
+                const response = await TransferCardAPI.card.updateCardData(this.currentCardDetail.id, updateData);
+                
+                if (response.success) {
+                    this.$message.success('数据保存成功');
+                    
+                    // 如果启用了协作，通知其他用户数据已保存
+                    if (this.isCollaborationEnabled) {
+                        this.broadcastDataChange('save_complete', {
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                    
+                    // 重新加载数据
+                    await this.loadCardDetailData(this.currentCardDetail.id);
+                } else {
+                    this.$message.error(response.message || '保存失败');
+                }
+            } catch (error) {
+                console.error('保存流转卡数据失败:', error);
+                this.$message.error('保存失败，请检查网络连接');
+            }
+        },
+
+        // 修改后的流转卡详情查看方法（带协作功能）
+        async viewCardDetailWithCollaboration(card) {
+            try {
+                this.currentCardDetail = { ...card };
+                this.cardDetailDialogVisible = true;
+                
+                // 设置查看模式标志
+                this.isViewMode = true;
+                
+                // 加载流转卡详细数据
+                await this.loadCardDetailData(card.id);
+                
+                // 尝试加入协作编辑
+                if (this.canEditCard(card)) {
+                    await this.joinCardCollaboration(card.id);
+                }
+                
+            } catch (error) {
+                console.error('加载流转卡详情失败:', error);
+                this.$message.error('加载流转卡详情失败');
+            }
+        },
+
+        // 修改后的流转卡编辑方法（带数据同步）
+        async editCardDataWithCollaboration(card) {
+            try {
+                this.currentEditingCard = { ...card };
+                this.cardDataEditForm = {
+                    status: card.status,
+                    table_data: []
+                };
+                
+                // 加载流转卡字段和数据
+                await this.loadCardEditData(card.id);
+                
+                // 启用数据同步
+                this.enableDataSync(card.id);
+                
+                this.cardDataEditDialogVisible = true;
+                
+            } catch (error) {
+                console.error('加载编辑数据失败:', error);
+                this.$message.error('加载编辑数据失败');
+            }
+        },
+
+        // 关闭对话框时清理协作状态
+        closeCardDetailDialogWithCleanup() {
+            this.leaveCardCollaboration();
+            this.cardDetailDialogVisible = false;
+            this.isViewMode = false;
+            this.currentCardDetail = null;
+        },
+
+        closeCardDataEditDialogWithCleanup() {
+            this.leaveCardCollaboration();
+            this.cleanupCollaborativeEdit();
+            this.cardDataEditDialogVisible = false;
+            this.currentEditingCard = null;
+        },
+
+        // 初始化新的协作编辑方案
+        initCollaborativeEdit(cardId) {
+            try {
+                console.log(' 初始化协作编辑方案v2.0，ID:', cardId);
+                
+                if (!window.collaborativeEditV2) {
+                    console.warn(' 协作编辑v2.0模块未找到');
+                    return;
+                }
+                
+                const token = TransferCardAPI.getAuthToken();
+                if (!token) {
+                    console.error(' 未找到认证token');
+                    return;
+                }
+                
+                // 设置Vue实例引用
+                window.collaborativeEditV2.setVueInstance(this);
+                
+                // 初始化协作编辑
+                window.collaborativeEditV2.init(
+                    cardId,
+                    {
+                        status: this.cardDataEditForm.status,
+                        table_data: this.cardDataEditForm.table_data
+                    },
+                    token
+                );
+                
+                // 设置事件回调
+                window.collaborativeEditV2.on('onSaveComplete', (result) => {
+                    console.log(' 协作编辑保存完成:', result);
+                    this.$message.success('数据保存成功');
+                    this.cardDataEditDialogVisible = false;
+                    this.loadTemplateCards(); // 刷新列表
+                });
+                
+                window.collaborativeEditV2.on('onError', (error) => {
+                    console.error(' 协作编辑错误:', error);
+                    this.$message.error(error.message || '保存失败');
+                });
+                
+                console.log(' 协作编辑v2.0初始化完成');
+                
+            } catch (error) {
+                console.error(' 初始化协作编辑失败:', error);
+                this.$message.error('协作编辑功能初始化失败');
+            }
+        },
+
+        // 清理协作编辑状态
+        cleanupCollaborativeEdit() {
+            try {
+                if (window.collaborativeEditV2) {
+                    window.collaborativeEditV2.destroy();
+                }
+                console.log(' 协作编辑状态已清理');
+            } catch (error) {
+                console.error(' 清理协作编辑状态失败:', error);
+            }
+        },
+
+        // 使用新的协作编辑方案保存数据
+        async saveCardDataEditWithCollaborativeEdit() {
+            try {
+                if (!this.currentEditingCard || !this.currentEditingCard.id) {
+                    this.$message.error('流转卡信息不完整');
+                    return;
+                }
+
+                const saveData = {
+                    status: this.cardDataEditForm.status,
+                    table_data: this.cardDataEditForm.table_data
+                };
+
+                console.log('💾 使用协作编辑v2.0保存数据');
+                
+                // 检查协作编辑模块是否存在
+                if (window.collaborativeEditV2) {
+                    // 使用协作编辑保存
+                    const result = await window.collaborativeEditV2.save(saveData);
+                    if (result.success) {
+                        this.$message.success('数据保存成功');
+                        this.cardDataEditDialogVisible = false;
+                        this.loadTemplateCards(); // 刷新列表
+                    } else {
+                        this.$message.error(result.message || '保存失败');
+                    }
+                } else {
+                    // 回退到普通保存方法
+                    console.log(' 协作编辑模块不可用，使用普通保存');
+                    const response = await TransferCardAPI.card.updateCardData(this.currentEditingCard.id, saveData);
+                    
+                    if (response.success) {
+                        this.$message.success('数据保存成功');
+                        this.cardDataEditDialogVisible = false;
+                        this.loadTemplateCards(); // 刷新列表
+                    } else {
+                        this.$message.error(response.message || '保存失败');
+                    }
+                }
+                
+            } catch (error) {
+                console.error(' 保存流转卡数据失败:', error);
+                this.$message.error('保存失败，请检查网络连接');
+            }
+        },
+
+        // 获取协作状态文本
+        getCollaborationStatusText() {
+            const statusMap = {
+                'disconnected': '未连接',
+                'connecting': '连接中',
+                'connected': '已连接',
+                'syncing': '同步中'
+            };
+            return statusMap[this.collaborationStatus] || '未知状态';
+        },
+
+        // 获取协作状态类型
+        getCollaborationStatusType() {
+            const typeMap = {
+                'disconnected': 'danger',
+                'connecting': 'warning',
+                'connected': 'success',
+                'syncing': 'primary'
+            };
+            return typeMap[this.collaborationStatus] || 'info';
+        },
+
+        // ========== 协作编辑事件处理方法 ==========
+
+        // 处理单元格变化
+        onCellChange(rowIndex, fieldName, value, field) {
+            try {
+                // 如果没有启用协作，直接返回
+                if (!this.isCollaborationEnabled) {
+                    return;
+                }
+
+                // 防抖处理，避免频繁发送
+                if (this.cellChangeTimeout) {
+                    clearTimeout(this.cellChangeTimeout);
+                }
+
+                this.cellChangeTimeout = setTimeout(() => {
+                    console.log(' 单元格变化:', { rowIndex, fieldName, value, field });
+                    
+                    // 记录待保存的更改
+                    this.$set(this.pendingChanges, `${rowIndex}-${fieldName}`, {
+                        value: value,
+                        field: field,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    // 广播单元格变化到其他用户
+                    this.broadcastDataChange('cell_change', {
+                        rowIndex: rowIndex,
+                        fieldName: fieldName,
+                        value: value,
+                        fieldType: field.field_type,
+                        userId: this.currentUser.id
+                    });
+                }, 300); // 300ms防抖
+
+            } catch (error) {
+                console.error(' 处理单元格变化失败:', error);
+            }
+        },
+
+        // 处理单元格获得焦点
+        onCellFocus(rowIndex, fieldName) {
+            try {
+                if (!this.isCollaborationEnabled) {
+                    return;
+                }
+
+                console.log('🎯 单元格获得焦点:', { rowIndex, fieldName });
+                
+                // 广播焦点事件，显示哪个用户正在编辑
+                this.broadcastDataChange('cell_focus', {
+                    rowIndex: rowIndex,
+                    fieldName: fieldName,
+                    userId: this.currentUser.id
+                });
+
+            } catch (error) {
+                console.error(' 处理单元格焦点失败:', error);
+            }
+        },
+
+        // 处理单元格失去焦点
+        onCellBlur(rowIndex, fieldName) {
+            try {
+                if (!this.isCollaborationEnabled) {
+                    return;
+                }
+
+                console.log('📤 单元格失去焦点:', { rowIndex, fieldName });
+                
+                // 广播失去焦点事件
+                this.broadcastDataChange('cell_blur', {
+                    rowIndex: rowIndex,
+                    fieldName: fieldName,
+                    userId: this.currentUser.id
+                });
+
+            } catch (error) {
+                console.error(' 处理单元格失焦失败:', error);
+            }
+        },
+
+        // ========== 数据同步相关方法 ==========
+
+        // 启用数据同步
+        enableDataSync(cardId) {
+            try {
+                console.log(' 启用数据同步，流转卡ID:', cardId);
+                
+                if (!window.simpleDataSync) {
+                    console.warn(' 数据同步模块未可用');
+                    return false;
+                }
+                
+                const token = TransferCardAPI.getAuthToken();
+                if (!token) {
+                    console.error(' 未找到认证token');
+                    return false;
+                }
+                
+                this.currentEditingCardId = cardId;
+                this.dataSyncEnabled = true;
+                
+                // 初始化数据同步
+                window.simpleDataSync.init(cardId, token);
+                
+                // 设置当前数据
+                window.simpleDataSync.setCurrentData({
+                    table_data: this.cardDataEditForm.table_data
+                });
+                
+                console.log(' 数据同步已启用');
+                return true;
+                
+            } catch (error) {
+                console.error(' 启用数据同步失败:', error);
+                this.$message.error('启用数据同步失败');
+                return false;
+            }
+        },
+
+        // 启用数据同步（流转卡版本）
+        enableDataSyncForCard(cardId) {
+            try {
+                console.log(' 启用流转卡数据同步，ID:', cardId);
+                
+                if (!window.simpleDataSync) {
+                    console.warn(' 数据同步模块未可用');
+                    return false;
+                }
+                
+                const token = TransferCardAPI.getAuthToken();
+                if (!token) {
+                    console.error(' 未找到认证token');
+                    return false;
+                }
+                
+                this.currentEditingCardId = cardId;
+                this.dataSyncEnabled = true;
+                
+                // 初始化数据同步
+                window.simpleDataSync.init(cardId, token);
+                
+                // 设置当前数据
+                window.simpleDataSync.setCurrentData({
+                    table_data: this.cardDataEditForm.table_data
+                });
+                
+                console.log(' 流转卡数据同步已启用');
+                return true;
+                
+            } catch (error) {
+                console.error(' 启用流转卡数据同步失败:', error);
+                this.$message.error('启用数据同步失败');
+                return false;
+            }
+        },
+
+        // 禁用数据同步
+        disableDataSync() {
+            try {
+                if (window.simpleDataSync) {
+                    window.simpleDataSync.destroy();
+                }
+                
+                this.dataSyncEnabled = false;
+                this.currentEditingCardId = null;
+                console.log(' 数据同步已禁用');
+                
+            } catch (error) {
+                console.error(' 禁用数据同步失败:', error);
+            }
+        },
+
+        // 处理数据同步变化（重新设计：真正实现数据同步）
+        handleDataSyncChange(mergedData) {
+            try {
+                console.log(' ===== 开始处理数据同步变化 =====');
+                console.log('📊 服务器合并数据:', mergedData);
+                console.log('📊 对话框状态:', this.cardDataEditDialogVisible);
+                
+                if (!this.cardDataEditDialogVisible || !mergedData.table_data) {
+                    console.log(' 对话框未打开或无数据，跳过同步');
+                    return;
+                }
+                
+                // 捕获当前用户正在编辑的内容
+                const currentUserEdits = this.captureCurrentUserEdits();
+                console.log('📸 捕获到当前用户编辑:', currentUserEdits);
+                
+                // 智能合并：服务器数据 + 当前用户编辑
+                const finalData = this.mergeServerAndUserData(mergedData, currentUserEdits);
+                console.log('🧠 智能合并后的最终数据:', finalData);
+                
+                // 更新Vue数据（这会更新DOM）
+                this.cardDataEditForm.table_data = finalData;
+                
+                // 在Vue更新完成后，恢复用户正在编辑的内容
+                this.$nextTick(() => {
+                    this.$nextTick(() => {
+                        this.restoreUserEdits(currentUserEdits);
+                        console.log(' 数据同步完成，用户编辑已恢复');
+                        
+                        // 显示友好的同步消息
+                        const hasServerChanges = this.detectServerChanges(mergedData);
+                        const hasUserEdits = currentUserEdits.size > 0;
+                        
+                        if (hasServerChanges && hasUserEdits) {
+                            this.$message({
+                                message: '检测到其他用户更新，您的编辑内容已保留',
+                                type: 'success',
+                                duration: 3000,
+                                showClose: true
+                            });
+                        } else if (hasServerChanges) {
+                            this.$message({
+                                message: '数据已同步到最新版本',
+                                type: 'info',
+                                duration: 2000,
+                                showClose: true
+                            });
+                        }
+                    });
+                });
+                
+            } catch (error) {
+                console.error(' 处理数据同步变化失败:', error);
+                this.$message.error('数据同步处理失败，请刷新页面');
+            }
+        },
+
+        // 捕获当前编辑状态（从DOM输入框获取）
+        captureCurrentEditingStates() {
+            const editingStates = new Map();
+            
+            try {
+                // 查找所有可见的输入框
+                const inputs = document.querySelectorAll('input[el-input__inner], textarea');
+                
+                inputs.forEach(input => {
+                    // 获取行号和字段名（从input的data属性或从父元素解析）
+                    const rowNumber = this.getRowNumberFromInput(input);
+                    const fieldName = this.getFieldNameFromInput(input);
+                    
+                    if (rowNumber && fieldName && input.value.trim() !== '') {
+                        if (!editingStates.has(rowNumber)) {
+                            editingStates.set(rowNumber, {});
+                        }
+                        editingStates.get(rowNumber)[fieldName] = input.value;
+                        console.log(` 捕获编辑状态: 行${rowNumber} 字段${fieldName} = ${input.value}`);
+                    }
+                });
+                
+                // 同时从数据同步模块获取待保存的更改
+                if (window.simpleDataSync && window.simpleDataSync.pendingChanges) {
+                    window.simpleDataSync.pendingChanges.forEach((change, rowNumber) => {
+                        if (!editingStates.has(rowNumber)) {
+                            editingStates.set(rowNumber, {});
+                        }
+                        Object.assign(editingStates.get(rowNumber), change.values);
+                        console.log(` 从同步模块获取: 行${rowNumber}`, change.values);
+                    });
+                }
+                
+            } catch (error) {
+                console.error(' 捕获编辑状态失败:', error);
+            }
+            
+            return editingStates;
+        },
+
+        // 恢复编辑状态到输入框
+        restoreEditingStates(editingStates) {
+            try {
+                editingStates.forEach((fields, rowNumber) => {
+                    Object.entries(fields).forEach(([fieldName, value]) => {
+                        // 查找对应的输入框
+                        const input = this.findInputForRowAndField(rowNumber, fieldName);
+                        if (input && input.value !== value) {
+                            input.value = value;
+                            console.log(` 恢复编辑状态: 行${rowNumber} 字段${fieldName} = ${value}`);
+                            
+                            // 触发input事件以确保Vue响应式更新
+                            const event = new Event('input', { bubbles: true });
+                            input.dispatchEvent(event);
+                        }
+                    });
+                });
+            } catch (error) {
+                console.error(' 恢复编辑状态失败:', error);
+            }
+        },
+
+        // 从输入框获取行号
+        getRowNumberFromInput(input) {
+            try {
+                // 尝试多种方式获取行号
+                const rowElement = input.closest('tr');
+                if (rowElement) {
+                    const rowIndex = Array.from(rowElement.parentNode.children).indexOf(rowElement);
+                    return rowIndex + 1; // 行号从1开始
+                }
+                
+                // 从data属性获取
+                const rowNum = input.getAttribute('data-row-number') || 
+                               input.closest('[data-row-number]')?.getAttribute('data-row-number');
+                return rowNum ? parseInt(rowNum) : null;
+            } catch (error) {
+                return null;
+            }
+        },
+
+        // 从输入框获取字段名
+        getFieldNameFromInput(input) {
+            try {
+                // 从data属性获取
+                const fieldName = input.getAttribute('data-field-name') || 
+                                 input.closest('[data-field-name]')?.getAttribute('data-field-name');
+                
+                if (fieldName) return fieldName;
+                
+                // 从name属性获取
+                if (input.name) return input.name;
+                
+                // 从占位符或父元素解析
+                const parent = input.closest('td');
+                if (parent) {
+                    const headerCell = parent.closest('table')?.querySelector('th')?.textContent;
+                    return headerCell?.trim() || null;
+                }
+                
+                return null;
+            } catch (error) {
+                return null;
+            }
+        },
+
+        // 查找指定行和字段的输入框
+        findInputForRowAndField(rowNumber, fieldName) {
+            try {
+                // 查找指定行的输入框
+                const rowElement = document.querySelector(`tr:nth-child(${rowNumber})`);
+                if (!rowElement) return null;
+                
+                // 在行内查找指定字段的输入框
+                const input = rowElement.querySelector(`[data-field-name="${fieldName}"]`) ||
+                             rowElement.querySelector(`[name="${fieldName}"]`) ||
+                             rowElement.querySelector('input') ||
+                             rowElement.querySelector('textarea');
+                
+                return input;
+            } catch (error) {
+                return null;
+            }
+        },
+
+        // 处理单元格编辑开始（数据同步版）
+        onCellEditStart(rowNumber, fieldName, value) {
+            try {
+                if (!this.dataSyncEnabled || !window.simpleDataSync) {
+                    return;
+                }
+                
+                console.log('✏️ 开始编辑单元格:', { rowNumber, fieldName, value });
+                
+                // 通知数据同步模块用户开始编辑
+                window.simpleDataSync.startEditing(rowNumber, fieldName, value);
+                
+            } catch (error) {
+                console.error(' 处理单元格编辑开始失败:', error);
+            }
+        },
+
+        // 处理单元格编辑结束（数据同步版）
+        onCellEditEnd(rowNumber) {
+            try {
+                if (!this.dataSyncEnabled || !window.simpleDataSync) {
+                    return;
+                }
+                
+                console.log(' 结束编辑单元格:', rowNumber);
+                
+                // 通知数据同步模块用户结束编辑
+                window.simpleDataSync.stopEditing(rowNumber);
+                
+            } catch (error) {
+                console.error(' 处理单元格编辑结束失败:', error);
+            }
+        },
+
+        // 清理数据同步状态
+        cleanupDataSync() {
+            try {
+                this.disableDataSync();
+                
+                // 清理相关数据
+                this.pendingChanges = {};
+                this.otherUsersData.clear();
+                
+                console.log(' 数据同步状态已清理');
+                
+            } catch (error) {
+                console.error(' 清理数据同步状态失败:', error);
+            }
+        },
+
+        // 获取数据同步状态文本
+        getSyncStatusText() {
+            const statusMap = {
+                'stopped': '已停止',
+                'running': '同步中',
+                'error': '同步错误'
+            };
+            return statusMap[this.syncStatus] || '未知状态';
+        },
+
+        // 获取数据同步状态类型
+        getSyncStatusType() {
+            const typeMap = {
+                'stopped': 'info',
+                'running': 'success',
+                'error': 'danger'
+            };
+            return typeMap[this.syncStatus] || 'info';
+        },
+
+        // 捕获DOM中的输入框状态
+        captureDOMInputs() {
+            const domInputs = new Map();
+            
+            try {
+                console.log(' 开始捕获DOM输入框状态');
+                
+                // 查找所有输入框，包括Element UI的输入框
+                const inputs = document.querySelectorAll(
+                    'input.el-input__inner, input[type="text"], textarea, ' +
+                    'input.el-date-editor, input.el-number__input'
+                );
+                
+                console.log(` 找到 ${inputs.length} 个输入框`);
+                
+                inputs.forEach((input, index) => {
+                    try {
+                        // 获取行号
+                        const rowElement = input.closest('tr');
+                        if (!rowElement) return;
+                        
+                        const rowNumber = Array.from(rowElement.parentNode.children).indexOf(rowElement) + 1;
+                        if (!rowNumber || rowNumber < 1) return;
+                        
+                        // 获取字段名
+                        const fieldName = this.getFieldNameFromInput(input);
+                        if (!fieldName) return;
+                        
+                        // 获取当前值
+                        const currentValue = input.value || '';
+                        
+                        // 只记录非空的或有意义的输入
+                        if (currentValue.trim() !== '') {
+                            if (!domInputs.has(rowNumber)) {
+                                domInputs.set(rowNumber, {});
+                            }
+                            domInputs.get(rowNumber)[fieldName] = currentValue;
+                            
+                            console.log(` DOM输入框捕获: 行${rowNumber} 字段${fieldName} = "${currentValue}"`);
+                        }
+                        
+                    } catch (error) {
+                        console.error(` 捕获输入框${index}失败:`, error);
+                    }
+                });
+                
+                console.log(' DOM输入框捕获完成，保护行数:', domInputs.size);
+                
+            } catch (error) {
+                console.error(' 捕获DOM输入失败:', error);
+            }
+            
+            return domInputs;
+        },
+
+        // 恢复DOM输入框状态（增强版：强制保持用户输入）
+        restoreDOMInputs(domInputs) {
+            try {
+                console.log(' 开始恢复DOM输入框状态，行数:', domInputs.size);
+                
+                // 使用更强力的方法保护用户输入
+                const protectUserInput = (input, value, rowNumber, fieldName) => {
+                    if (!input || input.value === value) return;
+                    
+                    console.log(` 强制恢复用户输入: 行${rowNumber} 字段${fieldName} = "${value}"`);
+                    
+                    // 方法1：直接设置value属性
+                    input.value = value;
+                    
+                    // 方法2：设置defaultValue（防止被Vue重置）
+                    input.defaultValue = value;
+                    
+                    // 方法3：设置setAttribute
+                    input.setAttribute('value', value);
+                    
+                    // 方法4：阻止Vue的响应式更新
+                    input._vueIgnore = true;
+                    
+                    // 方法5：触发多个事件确保Vue状态同步
+                    const events = ['input', 'change', 'blur', 'focus'];
+                    events.forEach(eventType => {
+                        const event = new Event(eventType, { 
+                            bubbles: true, 
+                            cancelable: true 
+                        });
+                        input.dispatchEvent(event);
+                    });
+                    
+                    // 方法6：延迟再次设置（防止异步覆盖）
+                    setTimeout(() => {
+                        input.value = value;
+                        input.setAttribute('value', value);
+                    }, 10);
+                };
+                
+                domInputs.forEach((fields, rowNumber) => {
+                    Object.entries(fields).forEach(([fieldName, value]) => {
+                        // 查找对应的输入框
+                        const input = this.findInputForRowAndField(rowNumber, fieldName);
+                        if (input && input.value !== value) {
+                            protectUserInput(input, value, rowNumber, fieldName);
+                        }
+                    });
+                });
+                
+                // 方法7：全局定时器，持续保护用户输入
+                if (this.domProtectionTimer) {
+                    clearInterval(this.domProtectionTimer);
+                }
+                
+                this.domProtectionTimer = setInterval(() => {
+                    domInputs.forEach((fields, rowNumber) => {
+                        Object.entries(fields).forEach(([fieldName, value]) => {
+                            const input = this.findInputForRowAndField(rowNumber, fieldName);
+                            if (input && input.value !== value) {
+                                protectUserInput(input, value, rowNumber, fieldName);
+                            }
+                        });
+                    });
+                }, 100); // 每100ms检查一次
+                
+                console.log(' DOM输入框状态恢复完成，启动持续保护');
+                
+            } catch (error) {
+                console.error(' 恢复DOM输入失败:', error);
+            }
+        },
+
+        // 查找指定行和字段的输入框（改进版）
+        findInputForRowAndField(rowNumber, fieldName) {
+            try {
+                // 查找指定行
+                const rowElement = document.querySelector(`tr:nth-child(${rowNumber})`);
+                if (!rowElement) {
+                    console.warn(` 未找到行${rowNumber}`);
+                    return null;
+                }
+                
+                // 在行内查找输入框的多种方式
+                let input = null;
+                
+                // 方式1：通过data属性查找
+                input = rowElement.querySelector(`[data-field-name="${fieldName}"]`) ||
+                       rowElement.querySelector(`[name="${fieldName}"]`);
+                
+                if (input) return input;
+                
+                // 方式2：通过表头文本查找字段对应的列
+                const table = rowElement.closest('table');
+                if (table) {
+                    const headers = table.querySelectorAll('th');
+                    let columnIndex = -1;
+                    
+                    headers.forEach((header, index) => {
+                        const headerText = header.textContent.trim();
+                        if (headerText === fieldName || headerText.includes(fieldName)) {
+                            columnIndex = index;
+                        }
+                    });
+                    
+                    if (columnIndex >= 0) {
+                        const cells = rowElement.querySelectorAll('td');
+                        if (cells[columnIndex]) {
+                            input = cells[columnIndex].querySelector('input') ||
+                                   cells[columnIndex].querySelector('textarea');
+                        }
+                    }
+                }
+                
+                // 方式3：查找第一个输入框（如果字段名不明确）
+                if (!input) {
+                    input = rowElement.querySelector('input') ||
+                           rowElement.querySelector('textarea');
+                }
+                
+                return input;
+                
+            } catch (error) {
+                console.error(` 查找输入框失败 行${rowNumber} 字段${fieldName}:`, error);
+                return null;
+            }
+        },
+
+        // ========== 部门流转顺序设置方法 ==========
+
+        // 打开流转设置对话框
+        async openFlowSettings(template) {
+            try {
+                this.flowSettingsTemplate = { ...template };
+                
+                // 加载可用部门
+                await this.loadAvailableDepartments();
+                
+                // 加载模板的流转部门
+                await this.loadTemplateFlowDepartments(template.id);
+                
+                this.flowSettingsDialogVisible = true;
+            } catch (error) {
+                console.error('打开流转设置失败:', error);
+                this.$message.error('打开流转设置失败');
+            }
+        },
+
+        // 加载可用部门
+        async loadAvailableDepartments() {
+            try {
+                const response = await TransferCardAPI.user.getDepartments();
+                if (response.success) {
+                    this.availableDepartmentsForFlow = response.data || [];
+                }
+            } catch (error) {
+                console.error('加载部门列表失败:', error);
+                this.$message.error('加载部门列表失败');
+            }
+        },
+
+        // 加载模板的流转部门
+        async loadTemplateFlowDepartments(templateId) {
+            try {
+                const response = await axios.get(
+                    `http://localhost:5000/api/flow/templates/${templateId}/departments`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${TransferCardAPI.getAuthToken()}`
+                        }
+                    }
+                );
+                
+                if (response.data.success) {
+                    this.templateFlowDepartments = response.data.data || [];
+                } else {
+                    this.$message.error(response.data.message || '加载流转部门失败');
+                }
+            } catch (error) {
+                console.error('加载流转部门失败:', error);
+                this.$message.error('加载流转部门失败，请检查网络连接');
+            }
+        },
+
+        // 添加部门到流转顺序
+        addDepartmentToFlow() {
+            if (!this.newDepartmentForFlow) {
+                this.$message.warning('请选择要添加的部门');
+                return;
+            }
+
+            // 检查部门是否已经在流转顺序中
+            const exists = this.templateFlowDepartments.some(
+                dept => dept.department_id === this.newDepartmentForFlow
+            );
+
+            if (exists) {
+                this.$message.warning('该部门已在流转顺序中');
+                return;
+            }
+
+            // 添加到流转顺序末尾
+            const nextOrder = this.templateFlowDepartments.length + 1;
+            const newDept = {
+                department_id: this.newDepartmentForFlow,
+                flow_order: nextOrder,
+                is_required: true,
+                auto_skip: false,
+                timeout_hours: 24
+            };
+
+            this.templateFlowDepartments.push(newDept);
+            this.newDepartmentForFlow = null;
+        },
+
+        // 删除流转部门
+        removeDepartmentFromFlow(dept) {
+            const index = this.templateFlowDepartments.indexOf(dept);
+            if (index > -1) {
+                this.templateFlowDepartments.splice(index, 1);
+                // 重新排序
+                this.reorderFlowDepartments();
+            }
+        },
+
+        // 上移流转部门
+        moveDepartmentUp(dept) {
+            const index = this.templateFlowDepartments.indexOf(dept);
+            if (index > 0) {
+                this.templateFlowDepartments.splice(index, 1);
+                this.templateFlowDepartments.splice(index - 1, 0, dept);
+                this.reorderFlowDepartments();
+            }
+        },
+
+        // 下移流转部门
+        moveDepartmentDown(dept) {
+            const index = this.templateFlowDepartments.indexOf(dept);
+            if (index < this.templateFlowDepartments.length - 1) {
+                this.templateFlowDepartments.splice(index, 1);
+                this.templateFlowDepartments.splice(index + 1, 0, dept);
+                this.reorderFlowDepartments();
+            }
+        },
+
+        // 重新排序流转部门
+        reorderFlowDepartments() {
+            this.templateFlowDepartments.forEach((dept, index) => {
+                dept.flow_order = index + 1;
+            });
+        },
+
+        // 保存流转顺序设置
+        async saveFlowSettings() {
+            try {
+                if (this.templateFlowDepartments.length === 0) {
+                    this.$message.warning('请至少添加一个流转部门');
+                    return;
+                }
+
+                const response = await axios.post(
+                    `http://localhost:5000/api/flow/templates/${this.flowSettingsTemplate.id}/departments`,
+                    { departments: this.templateFlowDepartments },
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${TransferCardAPI.getAuthToken()}`,
+                            'Content-Type': 'application/json'
+                        }
+                    }
+                );
+
+                if (response.data.success) {
+                    this.$message.success('流转顺序设置成功');
+                    this.flowSettingsDialogVisible = false;
+                } else {
+                    this.$message.error(response.data.message || '保存失败');
+                }
+            } catch (error) {
+                console.error('保存流转顺序失败:', error);
+                this.$message.error('保存流转顺序失败，请检查网络连接');
+            }
+        },
+
+        // 取消流转设置
+        cancelFlowSettings() {
+            this.flowSettingsDialogVisible = false;
+            this.templateFlowDepartments = [];
+            this.flowSettingsTemplate = {};
+        },
+
+        // 根据部门ID获取部门名称
+        getDepartmentName(departmentId) {
+            if (!departmentId || !this.availableDepartmentsForFlow) {
+                return '';
+            }
+            
+            const department = this.availableDepartmentsForFlow.find(
+                dept => dept.id === departmentId
+            );
+            
+            return department ? department.name : '';
+        },
+
+        // ========== 流转卡流转提交方法 ==========
+
+        // 检查是否可以提交到下一部门
+        canSubmitToNextDepartment() {
+            if (!this.currentEditingCard) {
+                return false;
+            }
+
+            // 管理员始终可以提交
+            if (this.currentUser && this.currentUser.role === 'admin') {
+                return true;
+            }
+
+            // 检查流转卡状态
+            if (this.currentEditingCard.status === 'completed' || 
+                this.currentEditingCard.status === 'cancelled') {
+                return false;
+            }
+
+            // 检查当前部门是否匹配
+            if (this.currentEditingCard.current_department_name !== this.currentUser.department_name) {
+                return false;
+            }
+
+            // 检查是否有流转配置
+            if (!this.currentEditingCard.flow_departments || this.currentEditingCard.flow_departments.length === 0) {
+                return false;
+            }
+
+            return true;
+        },
+
+        // 提交流转卡到下一部门
+        async submitCardToNextDepartment() {
+            try {
+                if (!this.currentEditingCard || !this.currentEditingCard.id) {
+                    this.$message.error('流转卡信息不完整');
+                    return;
+                }
+
+                // 确认提交
+                const confirmMessage = '确定要将此流转卡提交到下一部门吗？\n提交后，当前部门的填写将被锁定。';
+                await this.$confirm(confirmMessage, '确认提交', {
+                    confirmButtonText: '确定提交',
+                    cancelButtonText: '取消',
+                    type: 'warning'
+                });
+
+                // 检查必填字段
+                const requiredFields = this.cardDataEditFields.filter(field => field.is_required);
+                const missingFields = [];
+
+                this.cardDataEditForm.table_data.forEach((row, rowIndex) => {
+                    requiredFields.forEach(field => {
+                        const value = row[field.name];
+                        if (value === null || value === undefined || value === '') {
+                            missingFields.push({
+                                row: rowIndex + 1,
+                                field: field.display_name || field.name
+                            });
+                        }
+                    });
+                });
+
+                if (missingFields.length > 0) {
+                    const errorMsg = '以下必填字段未填写，请补充完整：\n' + 
+                                  missingFields.slice(0, 5).map(m => `第${m.row}行: ${m.field}`).join('\n') +
+                                  (missingFields.length > 5 ? `\n...还有 ${missingFields.length - 5} 个未填字段` : '');
+                    this.$message.error(errorMsg);
+                    return;
+                }
+
+                // 准备提交数据
+                const submitData = {
+                    status: 'in_progress',
+                    table_data: this.cardDataEditForm.table_data
+                };
+
+                console.log(' 开始提交流转卡到下一部门:', {
+                    cardId: this.currentEditingCard.id,
+                    currentStatus: this.currentEditingCard.status
+                });
+
+                // 先保存数据
+                const saveResponse = await TransferCardAPI.card.updateCardData(
+                    this.currentEditingCard.id,
+                    submitData
+                );
+
+                if (!saveResponse.success) {
+                    this.$message.error(saveResponse.message || '保存数据失败');
+                    return;
+                }
+
+                // 提交到下一部门
+                const submitResponse = await TransferCardAPI.flow.submitToNext(
+                    this.currentEditingCard.id,
+                    submitData
+                );
+
+                console.log('📡 提交响应:', submitResponse);
+
+                if (submitResponse.success) {
+                    const nextDepartment = submitResponse.data.next_department_name || '未知部门';
+                    
+                    this.$message({
+                        message: `流转卡已成功提交到 ${nextDepartment}`,
+                        type: 'success',
+                        duration: 3000
+                    });
+
+                    // 关闭对话框
+                    this.cardDataEditDialogVisible = false;
+
+                    // 刷新流转卡列表
+                    this.loadTemplateCards();
+
+                    // 清理数据同步状态
+                    this.cleanupDataSync();
+
+                    console.log(' 流转卡提交成功');
+                } else {
+                    this.$message.error(submitResponse.message || '提交失败');
+                }
+
+            } catch (error) {
+                if (error !== 'cancel') {
+                    console.error(' 提交流转卡失败:', error);
+                    this.$message.error('提交失败，请检查网络连接');
+                }
+            }
+        },
+
+        // 启动流转卡流转（管理员或创建人使用）
+        async startCardFlow(card) {
+            try {
+                if (!this.currentUser) {
+                    this.$message.warning('请先登录');
+                    return;
+                }
+
+                await this.$confirm('确定要启动此流转卡的流转吗？\n启动后，流转卡将按照预设的部门顺序流转。', '确认启动', {
+                    confirmButtonText: '确定启动',
+                    cancelButtonText: '取消',
+                    type: 'info'
+                });
+
+                const response = await TransferCardAPI.flow.startCardFlow(card.id);
+
+                if (response.success) {
+                    this.$message.success('流转卡已启动流转');
+                    this.loadTemplateCards();
+                } else {
+                    this.$message.error(response.message || '启动失败');
+                }
+            } catch (error) {
+                if (error !== 'cancel') {
+                    console.error('启动流转卡流转失败:', error);
+                    this.$message.error('启动失败');
+                }
+            }
+        },
+
+        // 驳回流转卡
+        async rejectCard(card) {
+            try {
+                if (!this.currentUser) {
+                    this.$message.warning('请先登录');
+                    return;
+                }
+
+                // 获取驳回原因
+                const { value: reason } = await this.$prompt('请输入驳回原因', '驳回流转卡', {
+                    confirmButtonText: '确定驳回',
+                    cancelButtonText: '取消',
+                    inputPattern: /.+/,
+                    inputErrorMessage: '驳回原因不能为空'
+                });
+
+                const response = await TransferCardAPI.flow.rejectCard(card.id, {
+                    reject_reason: reason
+                });
+
+                if (response.success) {
+                    this.$message.success('流转卡已驳回');
+                    this.loadTemplateCards();
+                } else {
+                    this.$message.error(response.message || '驳回失败');
+                }
+            } catch (error) {
+                if (error !== 'cancel') {
+                    console.error('驳回流转卡失败:', error);
+                    this.$message.error('驳回失败');
+                }
+            }
+        },
+
+        // 获取流转卡流转状态
+        async loadCardFlowStatus(cardId) {
+            try {
+                const response = await TransferCardAPI.flow.getCardFlowStatus(cardId);
+                if (response.success) {
+                    return response.data;
+                } else {
+                    console.error('获取流转状态失败:', response.message);
+                    return null;
+                }
+            } catch (error) {
+                console.error('获取流转状态失败:', error);
+                return null;
+            }
+        },
+
+        // ========== 流转卡列表中的流转操作方法 ==========
+
+        // 检查是否是最后一个部门
+        isLastDepartment(card) {
+            return card.is_last_department === 1 || card.is_last_department === true;
+        },
+
+        // 检查是否可以在列表中提交流转卡
+        canSubmitCard(card) {
+            if (!this.currentUser) {
+                return false;
+            }
+
+            // 管理员始终可以提交
+            if (this.currentUser.role === 'admin') {
+                return true;
+            }
+
+            // 检查流转卡状态
+            if (card.status === 'completed' || card.status === 'cancelled') {
+                return false;
+            }
+
+            // 使用后端返回的permission_level判断
+            // 只有'can_submit'权限的部门才能提交（当前处理部门）
+            if (card.permission_level === 'can_submit') {
+                return true;
+            }
+
+            // 'view_only'表示已提交过的部门，只能查看不能提交
+            // 'owner'表示创建者，但不是当前处理部门也不能提交
+            // 'none'表示无权限
+            return false;
+        },
+
+        // 检查是否可以启动流转卡流转
+        canStartCardFlow(card) {
+            if (!this.currentUser) {
+                return false;
+            }
+
+            // 只有管理员或创建人可以启动流转
+            if (this.currentUser.role === 'admin' || 
+                card.creator_id === this.currentUser.id) {
+                // 只有草稿状态才能启动流转
+                return card.status === 'draft';
+            }
+
+            return false;
+        },
+
+        // 从列表中完成流转卡（最后一个部门使用）
+        async completeCardFromList(card) {
+            // 完成流转卡和提交到下一部门实际上使用相同的后端接口
+            // 后端会自动判断是否是最后一个部门，如果是就完成流转
+            return await this.submitCardFromList(card);
+        },
+
+        // 从列表中提交流转卡到下一部门
+        async submitCardFromList(card) {
+            try {
+                if (!card || !card.id) {
+                    this.$message.error('流转卡信息不完整');
+                    return;
+                }
+
+                // 确认提交
+                const confirmMessage = `确定要将流转卡 ${card.card_number} 提交到下一部门吗？\n提交后，当前部门的填写将被锁定。`;
+                await this.$confirm(confirmMessage, '确认提交', {
+                    confirmButtonText: '确定提交',
+                    cancelButtonText: '取消',
+                    type: 'warning'
+                });
+
+                // 加载流转卡数据
+                const dataResponse = await TransferCardAPI.card.getCardData(card.id);
+                if (!dataResponse.success) {
+                    this.$message.error('加载流转卡数据失败');
+                    return;
+                }
+
+                // 检查必填字段
+                const fields = dataResponse.data.fields || [];
+                const tableData = dataResponse.data.table_data || [];
+                const requiredFields = fields.filter(field => field.is_required);
+                const missingFields = [];
+
+                tableData.forEach((row, rowIndex) => {
+                    requiredFields.forEach(field => {
+                        const value = row[field.name];
+                        if (value === null || value === undefined || value === '') {
+                            missingFields.push({
+                                row: rowIndex + 1,
+                                field: field.display_name || field.name
+                            });
+                        }
+                    });
+                });
+
+                if (missingFields.length > 0) {
+                    const errorMsg = '以下必填字段未填写，请点击"填写"按钮补充完整：\n' + 
+                                  missingFields.slice(0, 5).map(m => `第${m.row}行: ${m.field}`).join('\n') +
+                                  (missingFields.length > 5 ? `\n...还有 ${missingFields.length - 5} 个未填字段` : '');
+                    this.$message.error(errorMsg);
+                    return;
+                }
+
+                // 提交到下一部门
+                const submitResponse = await TransferCardAPI.flow.submitToNext(
+                    card.id,
+                    {
+                        status: 'in_progress',
+                        table_data: tableData
+                    }
+                );
+
+                console.log('📡 提交响应:', submitResponse);
+
+                if (submitResponse.success) {
+                    const nextDepartment = submitResponse.data.next_department_name || '未知部门';
+                    
+                    this.$message({
+                        message: `流转卡 ${card.card_number} 已成功提交到 ${nextDepartment}`,
+                        type: 'success',
+                        duration: 3000
+                    });
+
+                    // 刷新流转卡列表
+                    this.loadTemplateCards();
+
+                    console.log(' 流转卡提交成功');
+                } else {
+                    this.$message.error(submitResponse.message || '提交失败');
+                }
+
+            } catch (error) {
+                if (error !== 'cancel') {
+                    console.error(' 提交流转卡失败:', error);
+                    this.$message.error('提交失败，请检查网络连接');
+                }
             }
         }
     }

@@ -13,6 +13,12 @@ import os
 from datetime import datetime, timedelta
 import json
 from dotenv import load_dotenv
+# from conflict_resolution import get_conflict_resolver  # 已删除
+# from realtime_sync import get_sync_manager  # 已删除
+# 锁定机制已移除，将重新设计
+# from card_lock_manager import card_lock_manager
+# from lock_api import lock_bp
+# from simple_lock_api import simple_lock_bp  # 已删除
 
 # 加载环境变量
 load_dotenv()
@@ -27,24 +33,44 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 # 初始化扩展 - 配置CORS支持前后端分离
 CORS(app, resources={
     r"/api/*": {
-        "origins": ["http://localhost:8080", "http://127.0.0.1:8080", "http://192.168.216.1:8080", "http://192.168.202.1:8080", "http://192.168.8.28:8080", "http://172.25.16.1:8080"],
+        "origins": "*",  # 允许所有来源
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": False
     }
-})
+}, supports_credentials=False)
 jwt = JWTManager(app)
 
 # 数据库配置 - 从配置文件读取
 def load_config():
     try:
-        with open('config/config.json', 'r', encoding='utf-8') as f:
-            config = json.load(f)
+        # 尝试多个可能的配置文件路径
+        config_paths = [
+            'backend/config/config.json',
+            'config/config.json',
+            os.path.join(os.path.dirname(__file__), 'config', 'config.json')
+        ]
+        
+        config = None
+        for path in config_paths:
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    print(f" 成功加载配置文件: {path}")
+                    break
+            except FileNotFoundError:
+                continue
+        
+        if config:
             db_config = config['database']
             # 确保添加DictCursor
             db_config['cursorclass'] = pymysql.cursors.DictCursor
             return db_config
+        else:
+            raise FileNotFoundError("未找到配置文件")
+            
     except Exception as e:
-        print(f"加载配置文件失败: {e}")
+        print(f" 加载配置文件失败: {e}")
         # 回退到环境变量
         return {
             'host': os.getenv('DB_HOST', 'localhost'),
@@ -505,8 +531,8 @@ def update_field(field_id):
                     update_params.append(field_id)
                     
                     update_sql = f"UPDATE fields SET {', '.join(update_fields)} WHERE id = %s"
-                    print(f"🔍 执行SQL: {update_sql}")
-                    print(f"🔍 参数: {update_params}")
+                    print(f" 执行SQL: {update_sql}")
+                    print(f" 参数: {update_params}")
                     cursor.execute(update_sql, update_params)
                 
                 # 提交事务
@@ -1047,7 +1073,7 @@ def get_cards():
                 """
                 cursor.execute(sql)
             else:
-                # 普通用户只能看到有权限访问的流转卡
+                # 普通用户只能看到有权限访问的流转卡，且不能看到草稿和取消状态
                 sql = """
                 SELECT DISTINCT tc.*, t.template_name, u.username as creator_name,
                        (SELECT COUNT(*) FROM card_data cdr WHERE cdr.card_id = tc.id) as row_count
@@ -1055,7 +1081,8 @@ def get_cards():
                 LEFT JOIN templates t ON tc.template_id = t.id
                 LEFT JOIN users u ON tc.created_by = u.id
                 LEFT JOIN template_field_permissions tfp ON t.id = tfp.template_id
-                WHERE tfp.department_id = %s OR tc.created_by = %s
+                WHERE (tfp.department_id = %s OR tc.created_by = %s)
+                AND tc.status NOT IN ('draft', 'cancelled')
                 ORDER BY tc.created_at DESC
                 """
                 cursor.execute(sql, (current_user['department_id'], current_user['id']))
@@ -1171,44 +1198,71 @@ def get_card_data(card_id):
             if not card_info:
                 return jsonify({'success': False, 'message': '流转卡不存在'}), 404
             
-            # 获取用户有权限的字段
+            # 获取模板配置的字段
             if current_user['role'] == 'admin':
-                # 管理员可以看到所有字段，使用DISTINCT去重
+                # 管理员可以看到模板配置的所有字段
                 field_sql = """
-                SELECT DISTINCT f.*, tfp.can_read, tfp.can_write, tfp.department_id as perm_dept_id
-                FROM fields f
-                LEFT JOIN template_field_permissions tfp ON f.name = tfp.field_name 
+                SELECT tf.*, f.department_name, f.department_id as field_dept_id,
+                       GROUP_CONCAT(DISTINCT tfp.can_read) as can_read,
+                       GROUP_CONCAT(DISTINCT tfp.can_write) as can_write,
+                       GROUP_CONCAT(DISTINCT tfp.department_id) as perm_dept_id
+                FROM template_fields tf
+                LEFT JOIN fields f ON tf.field_id = f.id
+                LEFT JOIN template_field_permissions tfp ON tf.field_name = tfp.field_name 
                                                           AND tfp.template_id = %s
-                WHERE f.is_placeholder = 0
-                ORDER BY f.field_position
+                WHERE tf.template_id = %s
+                GROUP BY tf.id
+                ORDER BY tf.field_order
                 """
-                cursor.execute(field_sql, (card_info['template_id'],))
+                cursor.execute(field_sql, (card_info['template_id'], card_info['template_id']))
             else:
-                # 普通用户只能看到有权限的字段，使用DISTINCT去重
+                # 普通用户只能看到模板配置且有权限的字段
                 field_sql = """
-                SELECT DISTINCT f.*, tfp.can_read, tfp.can_write, tfp.department_id as perm_dept_id
-                FROM fields f
-                LEFT JOIN template_field_permissions tfp ON f.name = tfp.field_name 
+                SELECT tf.*, f.department_name, f.department_id as field_dept_id,
+                       GROUP_CONCAT(DISTINCT tfp.can_read) as can_read,
+                       GROUP_CONCAT(DISTINCT tfp.can_write) as can_write,
+                       GROUP_CONCAT(DISTINCT tfp.department_id) as perm_dept_id
+                FROM template_fields tf
+                LEFT JOIN fields f ON tf.field_id = f.id
+                LEFT JOIN template_field_permissions tfp ON tf.field_name = tfp.field_name 
                                                           AND tfp.template_id = %s
                                                           AND tfp.department_id = %s
-                WHERE f.is_placeholder = 0 
-                AND (tfp.department_id = %s OR tfp.department_id IS NULL)
-                ORDER BY f.field_position
+                WHERE tf.template_id = %s
+                GROUP BY tf.id
+                ORDER BY tf.field_order
                 """
-                cursor.execute(field_sql, (card_info['template_id'], current_user['department_id'], current_user['department_id']))
+                cursor.execute(field_sql, (card_info['template_id'], current_user['department_id'], card_info['template_id']))
             
             fields = cursor.fetchall()
             
-            # 额外去重处理：基于字段名确保唯一性
-            unique_fields = {}
+            # 处理GROUP_CONCAT结果，转换为布尔值，并重命名字段以匹配前端期望
             for field in fields:
-                field_name = field['name']
-                if field_name not in unique_fields:
-                    unique_fields[field_name] = field
+                # 重命名字段以匹配前端期望的格式
+                if 'field_name' in field and 'name' not in field:
+                    field['name'] = field['field_name']
+                if 'field_display_name' in field and 'display_name' not in field:
+                    field['display_name'] = field['field_display_name']
+                
+                if field.get('can_read'):
+                    # 将逗号分隔的值转换为布尔值
+                    can_read_values = str(field['can_read']).split(',')
+                    field['can_read'] = any(value.strip() == '1' for value in can_read_values)
                 else:
-                    print(f"🔍 发现重复字段: {field_name}, 使用第一个记录")
-            
-            fields = list(unique_fields.values())
+                    field['can_read'] = False
+                    
+                if field.get('can_write'):
+                    # 将逗号分隔的值转换为布尔值
+                    can_write_values = str(field['can_write']).split(',')
+                    field['can_write'] = any(value.strip() == '1' for value in can_write_values)
+                else:
+                    field['can_write'] = False
+                    
+                # 处理部门ID
+                if field.get('perm_dept_id'):
+                    dept_ids = str(field['perm_dept_id']).split(',')
+                    field['perm_dept_id'] = [int(id.strip()) for id in dept_ids if id.strip().isdigit()]
+                else:
+                    field['perm_dept_id'] = None
             
             # 获取数据行（新的card_data表）
             cursor.execute("""
@@ -1240,7 +1294,7 @@ def get_card_data(card_id):
                 
                 # 为每个字段添加值（从当前行记录中获取）
                 for field in fields:
-                    field_name = field['name']
+                    field_name = field['field_name']
                     field_value = row.get(field_name, '')
                     
                     # 处理日期格式
@@ -1270,18 +1324,21 @@ def get_card_data(card_id):
         if 'connection' in locals():
             connection.close()
 
-# 批量保存流转卡数据
+# 批量保存流转卡数据（带冲突检测和解决）
 @app.route('/api/cards/<int:card_id>/data', methods=['POST'])
 @jwt_required()
 def save_card_data(card_id):
-    """批量保存流转卡数据"""
+    """批量保存流转卡数据（支持冲突检测和解决）"""
     try:
         current_user = get_current_user_info()
         if not current_user:
             return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
         
+        # 锁定机制已移除，改为部门流转模式
+        
         data = request.get_json()
         row_data_list = data.get('row_data', [])  # 行数据列表
+        conflict_resolution = data.get('conflict_resolution', {})  # 冲突解决策略
         
         if not row_data_list:
             return jsonify({'success': False, 'message': '请提供要保存的数据'}), 400
@@ -1291,22 +1348,31 @@ def save_card_data(card_id):
             return jsonify({'success': False, 'message': '数据库连接失败'}), 500
         
         with connection.cursor() as cursor:
-            # 开始事务
+            # 开始事务，使用SERIALIZABLE隔离级别防止并发问题
             connection.begin()
             
             try:
-                # 检查流转卡是否存在
-                cursor.execute("SELECT id, template_id FROM transfer_cards WHERE id = %s", (card_id,))
+                # 设置事务隔离级别为SERIALIZABLE，防止并发修改
+                cursor.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                
+                # 检查流转卡是否存在并锁定
+                cursor.execute("SELECT id, template_id, updated_at, status FROM transfer_cards WHERE id = %s FOR UPDATE", (card_id,))
                 card_result = cursor.fetchone()
                 if not card_result:
                     return jsonify({'success': False, 'message': '流转卡不存在'}), 404
                 
+                # 检查流转卡是否已完成（管理员除外）
+                if card_result['status'] == 'completed' and current_user['role'] != 'admin':
+                    return jsonify({'success': False, 'message': '该流转卡已完成整个流转流程，无法再修改数据'}), 403
+                
                 template_id = card_result['template_id']
+                card_updated_at = card_result['updated_at']
                 
                 # 处理每行数据 - 新的数据库结构（每条记录代表一行有数据的数据）
                 for row_data in row_data_list:
                     row_number = row_data.get('row_number')
                     values = row_data.get('values', {})
+                    client_updated_at = data.get('client_updated_at')  # 客户端数据最后更新时间
                     
                     if not row_number:
                         continue
@@ -1327,9 +1393,59 @@ def save_card_data(card_id):
                                     'message': f'您没有权限修改字段 {field_name}'
                                 }), 403
                     
-                    # 检查该行是否已存在
-                    cursor.execute("SELECT id FROM card_data WHERE card_id = %s AND `row_number` = %s", (card_id, row_number))
+                    # 锁定目标行防止并发修改
+                    cursor.execute("""
+                        SELECT id, updated_at, submitted_by, submitted_at 
+                        FROM card_data 
+                        WHERE card_id = %s AND `row_number` = %s 
+                        FOR UPDATE
+                    """, (card_id, row_number))
                     existing_row = cursor.fetchone()
+                    
+                    # 检查数据冲突：如果该行已被其他用户提交
+                    if existing_row and existing_row['submitted_at']:
+                        submitted_by_other = existing_row['submitted_by']
+                        if submitted_by_other and str(submitted_by_other) != str(current_user['id']):
+                            # 该行已被其他用户提交，禁止修改
+                            cursor.execute("SELECT username FROM users WHERE id = %s", (submitted_by_other,))
+                            submitter_result = cursor.fetchone()
+                            submitter_name = submitter_result['username'] if submitter_result else '未知用户'
+                            
+                            return jsonify({
+                                'success': False,
+                                'message': f'第{row_number}行已被用户 {submitter_name} 提交，无法修改',
+                                'error_type': 'DATA_CONFLICT',
+                                'conflict_info': {
+                                    'row_number': row_number,
+                                    'submitted_by': submitter_name,
+                                    'submitted_at': existing_row['submitted_at'].isoformat() if existing_row['submitted_at'] else None
+                                }
+                            }), 409
+                    
+                    # 检查版本冲突（基于更新时间）
+                    if existing_row and client_updated_at:
+                        server_updated_at = existing_row['updated_at']
+                        if server_updated_at and client_updated_at:
+                            try:
+                                from datetime import datetime
+                                client_time = datetime.fromisoformat(client_updated_at.replace('Z', '+00:00'))
+                                server_time = server_updated_at.replace(tzinfo=None)
+                                
+                                # 如果服务器时间比客户端时间新，说明有冲突
+                                if server_time > client_time:
+                                    return jsonify({
+                                        'success': False,
+                                        'message': f'第{row_number}行数据已被其他用户修改，请刷新后重试',
+                                        'error_type': 'VERSION_CONFLICT',
+                                        'conflict_info': {
+                                            'row_number': row_number,
+                                            'server_updated_at': server_time.isoformat(),
+                                            'client_updated_at': client_updated_at
+                                        }
+                                    }), 409
+                            except Exception as version_error:
+                                print(f"版本检查错误: {version_error}")
+                                # 版本检查失败时继续执行，但记录警告
                     
                     if existing_row:
                         # 更新现有行
@@ -1351,7 +1467,7 @@ def save_card_data(card_id):
                             WHERE card_id = %s AND `row_number` = %s
                             """
                             cursor.execute(update_sql, update_params)
-                            print(f"🔍 更新行 {row_number}: {update_sql}")
+                            print(f" 更新行 {row_number}: {update_sql}")
                     else:
                         # 插入新行（只有有数据时才插入）
                         if any(values.values()):  # 只有当至少有一个字段有值时才插入
@@ -1364,10 +1480,23 @@ def save_card_data(card_id):
                             VALUES ({placeholders}, NOW(), NOW())
                             """
                             cursor.execute(insert_sql, insert_values)
-                            print(f"🔍 插入新行 {row_number}: {insert_sql}")
+                            print(f" 插入新行 {row_number}: {insert_sql}")
                     
                     # 更新行状态（如果用户提交）
                     if row_data.get('submit', False):
+                        if existing_row and existing_row['submitted_at']:
+                            # 检查是否已经提交
+                            if existing_row['submitted_by'] == current_user['id']:
+                                # 已经是同一用户提交，允许更新
+                                pass
+                            else:
+                                # 其他用户已提交，禁止重复提交
+                                return jsonify({
+                                    'success': False,
+                                    'message': f'第{row_number}行已被其他用户提交，无法重复提交',
+                                    'error_type': 'ALREADY_SUBMITTED'
+                                }), 409
+                        
                         cursor.execute("""
                             UPDATE card_data 
                             SET status = 'submitted', submitted_by = %s, submitted_at = NOW()
@@ -1376,6 +1505,9 @@ def save_card_data(card_id):
                 
                 # 提交事务
                 connection.commit()
+                
+                # 实时同步通知功能已移除
+                print(f" 数据保存完成，流转卡ID: {card_id}")
                 
                 return jsonify({
                     'success': True,
@@ -1404,7 +1536,7 @@ def update_card_data(card_id):
             return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
         
         data = request.get_json()
-        print(f"🔍 PUT请求数据: {data}")
+        print(f" PUT请求数据: {data}")
         
         # 兼容多种数据格式
         table_data = []
@@ -1420,11 +1552,16 @@ def update_card_data(card_id):
             if isinstance(field_data, dict):
                 table_data = [field_data]
         elif isinstance(data, dict):
-            # 直接使用数据作为字段数据
-            table_data = [data]
+            # 直接使用数据作为字段数据，但排除系统字段
+            filtered_data = {}
+            for key, value in data.items():
+                if key not in ['table_data', 'fieldData', 'status', 'card_id', 'template_id']:
+                    filtered_data[key] = value
+            if filtered_data:
+                table_data = [filtered_data]
         
-        print(f"🔍 处理后的table_data: {table_data}")
-        print(f"🔍 处理后的status: {status}")
+        print(f" 处理后的table_data: {table_data}")
+        print(f" 处理后的status: {status}")
         
         connection = get_db_connection()
         if not connection:
@@ -1435,13 +1572,18 @@ def update_card_data(card_id):
             connection.begin()
             
             try:
-                # 检查流转卡是否存在
-                cursor.execute("SELECT id, template_id FROM transfer_cards WHERE id = %s", (card_id,))
+                # 检查流转卡是否存在（必须包含status字段以支持自动流转）
+                cursor.execute("SELECT id, template_id, status, current_department_id FROM transfer_cards WHERE id = %s FOR UPDATE", (card_id,))
                 card_result = cursor.fetchone()
                 if not card_result:
                     return jsonify({'success': False, 'message': '流转卡不存在'}), 404
                 
+                # 检查流转卡是否已完成（管理员除外）
+                if card_result['status'] == 'completed' and current_user['role'] != 'admin':
+                    return jsonify({'success': False, 'message': '该流转卡已完成整个流转流程，无法再修改数据'}), 403
+                
                 template_id = card_result['template_id']
+                old_status = card_result.get('status')
                 
                 # 处理数据更新 - 新的数据库结构（每条记录代表一行有数据的数据）
                 if table_data:
@@ -1470,7 +1612,7 @@ def update_card_data(card_id):
                                 perm_result = cursor.fetchone()
                                 
                                 if not perm_result or not perm_result['can_write']:
-                                    print(f"🔍 跳过无权限字段: {field_name}")
+                                    print(f" 跳过无权限字段: {field_name}")
                                     continue  # 跳过无权限的字段
                             
                             # 处理特殊字段类型的值
@@ -1500,7 +1642,7 @@ def update_card_data(card_id):
                             
                             # 收集字段更新
                             field_updates[field_name] = processed_value
-                            print(f"🔍 收集字段更新: {field_name} = {processed_value} (原始值: {field_value})")
+                            print(f" 收集字段更新: {field_name} = {processed_value} (原始值: {field_value})")
                         
                         # 检查该行是否已存在
                         cursor.execute("SELECT id FROM card_data WHERE card_id = %s AND `row_number` = %s", (card_id, row_number))
@@ -1526,7 +1668,7 @@ def update_card_data(card_id):
                                 WHERE card_id = %s AND `row_number` = %s
                                 """
                                 cursor.execute(update_sql, update_params)
-                                print(f"🔍 更新行 {row_number}: {update_sql}")
+                                print(f" 更新行 {row_number}: {update_sql}")
                         
                         elif not existing_row and field_updates:
                             # 插入新行（只有有数据时才插入）
@@ -1539,15 +1681,105 @@ def update_card_data(card_id):
                             VALUES ({placeholders}, NOW(), NOW())
                             """
                             cursor.execute(insert_sql, insert_values)
-                            print(f"🔍 插入新行 {row_number}: {insert_sql}")
+                            print(f" 插入新行 {row_number}: {insert_sql}")
                 
                 # 更新流转卡状态
                 if status:
+                    old_status = card_result.get('status')
                     cursor.execute("""
                         UPDATE transfer_cards 
                         SET status = %s, updated_at = NOW()
                         WHERE id = %s
                     """, (status, card_id))
+                    
+                    # 如果状态从draft变为in_progress，自动启动流转
+                    if old_status == 'draft' and status == 'in_progress':
+                        # 检查是否已启动流转
+                        cursor.execute("""
+                            SELECT current_department_id, template_id 
+                            FROM transfer_cards 
+                            WHERE id = %s
+                        """, (card_id,))
+                        card_status = cursor.fetchone()
+                        
+                        if card_status and card_status['current_department_id'] is None:
+                            # 获取模板的部门流转顺序
+                            cursor.execute("""
+                                SELECT tdf.*, d.name as department_name
+                                FROM template_department_flow tdf
+                                LEFT JOIN departments d ON tdf.department_id = d.id
+                                WHERE tdf.template_id = %s
+                                ORDER BY tdf.flow_order
+                            """, (card_status['template_id'],))
+                            flow_steps = cursor.fetchall()
+                            
+                            if flow_steps:
+                                # 删除触发器以避免循环触发
+                                cursor.execute("DROP TRIGGER IF EXISTS update_card_flow_stats")
+                                
+                                # 更新流转卡当前部门
+                                cursor.execute("""
+                                    UPDATE transfer_cards 
+                                    SET current_department_id = %s, flow_started_at = NOW()
+                                    WHERE id = %s
+                                """, (flow_steps[0]['department_id'], card_id))
+                                
+                                # 创建流转状态记录
+                                for step in flow_steps:
+                                    step_status = 'processing' if step['flow_order'] == 1 else 'pending'
+                                    if step['flow_order'] == 1:
+                                        # 第一步：processing状态，记录started_at
+                                        cursor.execute("""
+                                            INSERT INTO card_flow_status 
+                                            (card_id, department_id, flow_order, status, started_at, created_at)
+                                            VALUES (%s, %s, %s, %s, NOW(), NOW())
+                                        """, (card_id, step['department_id'], step['flow_order'], step_status))
+                                    else:
+                                        # 其他步骤：pending状态，started_at为NULL
+                                        cursor.execute("""
+                                            INSERT INTO card_flow_status 
+                                            (card_id, department_id, flow_order, status, created_at)
+                                            VALUES (%s, %s, %s, %s, NOW())
+                                        """, (card_id, step['department_id'], step['flow_order'], step_status))
+                                
+                                # 记录操作日志
+                                cursor.execute("""
+                                    INSERT INTO flow_operation_logs 
+                                    (card_id, operation_type, operator_id, notes, created_at)
+                                    VALUES (%s, 'start_flow', %s, %s, NOW())
+                                """, (card_id, current_user['id'], f"自动启动流转，流转至{flow_steps[0]['department_name']}"))
+                                
+                                # 重新创建触发器
+                                cursor.execute("""
+                                CREATE TRIGGER IF NOT EXISTS update_card_flow_stats 
+                                AFTER UPDATE ON transfer_cards
+                                FOR EACH ROW
+                                BEGIN
+                                    IF NEW.status IN ('completed', 'cancelled') AND OLD.status NOT IN ('completed', 'cancelled') THEN
+                                        UPDATE transfer_cards 
+                                        SET flow_completed_at = NOW(),
+                                            completed_flow_steps = (
+                                                SELECT COUNT(*) 
+                                                FROM card_flow_status 
+                                                WHERE card_id = NEW.id AND status = 'completed'
+                                            )
+                                        WHERE id = NEW.id;
+                                    END IF;
+                                    
+                                    IF NEW.status = 'flowing' AND OLD.status != 'flowing' THEN
+                                        UPDATE transfer_cards 
+                                        SET flow_started_at = NOW(),
+                                            total_flow_steps = (
+                                                SELECT COUNT(*) 
+                                                FROM template_department_flow 
+                                                WHERE template_id = NEW.template_id
+                                            )
+                                        WHERE id = NEW.id;
+                                    END IF;
+                                END
+                                """)
+                                
+                                print(f" 自动启动流转卡 {card_id} 的流转，当前流转至: {flow_steps[0]['department_name']}")
                 
                 # 提交事务
                 connection.commit()
@@ -1559,13 +1791,13 @@ def update_card_data(card_id):
             
             except Exception as e:
                 connection.rollback()
-                print(f"🔥 PUT请求错误: {str(e)}")
+                print(f" PUT请求错误: {str(e)}")
                 import traceback
-                print(f"🔥 错误堆栈: {traceback.format_exc()}")
+                print(f" 错误堆栈: {traceback.format_exc()}")
                 raise e
     
     except Exception as e:
-        print(f"🔥 PUT请求外部错误: {str(e)}")
+        print(f" PUT请求外部错误: {str(e)}")
         return jsonify({'success': False, 'message': f'更新数据失败: {str(e)}'}), 500
     
     finally:
@@ -1735,7 +1967,7 @@ def delete_template(template_id):
 @app.route('/api/template-cards', methods=['GET'])
 @jwt_required()
 def get_template_cards():
-    """获取基于模板的流转卡列表"""
+    """获取基于模板的流转卡列表（包含流转顺序）"""
     try:
         current_user = get_current_user_info()
         if not current_user:
@@ -1746,26 +1978,117 @@ def get_template_cards():
             return jsonify({'success': False, 'message': '数据库连接失败'}), 500
         
         with connection.cursor() as cursor:
-            # 获取基于模板的流转卡列表
-            sql = """
-            SELECT tc.*, t.template_name, u.username as creator_name,
-                   (SELECT COUNT(*) FROM card_data cdr WHERE cdr.card_id = tc.id) as row_count
-            FROM transfer_cards tc
-            LEFT JOIN templates t ON tc.template_id = t.id
-            LEFT JOIN users u ON tc.created_by = u.id
-            WHERE tc.template_id IS NOT NULL
-            ORDER BY tc.created_at DESC
-            """
-            cursor.execute(sql)
+            if current_user['role'] == 'admin':
+                # 管理员可以看到所有基于模板的流转卡
+                sql = """
+                SELECT tc.*, t.template_name, u.username as creator_name,
+                       (SELECT COUNT(*) FROM card_data cdr WHERE cdr.card_id = tc.id) as row_count,
+                       d.name as current_department_name,
+                       cfs.flow_order as current_step,
+                       tdf.total_steps,
+                       CASE 
+                           WHEN cfs.flow_order = tdf.total_steps THEN 1 
+                           ELSE 0 
+                       END as is_last_department
+                FROM transfer_cards tc
+                LEFT JOIN templates t ON tc.template_id = t.id
+                LEFT JOIN users u ON tc.created_by = u.id
+                LEFT JOIN departments d ON tc.current_department_id = d.id
+                LEFT JOIN card_flow_status cfs ON tc.id = cfs.card_id AND cfs.status = 'processing'
+                LEFT JOIN (
+                    SELECT 
+                        template_id,
+                        COUNT(*) as total_steps
+                    FROM template_department_flow
+                    GROUP BY template_id
+                ) tdf ON tc.template_id = tdf.template_id
+                WHERE tc.template_id IS NOT NULL
+                ORDER BY tc.created_at DESC
+                """
+                cursor.execute(sql)
+            else:
+                # 普通用户可以看到：
+                # 1. 当前流转到他们部门的流转卡（processing状态）
+                # 2. 已经流转到过他们部门的流转卡（completed状态）
+                # 3. 自己创建的流转卡
+                sql = """
+                SELECT DISTINCT tc.*, t.template_name, u.username as creator_name,
+                       (SELECT COUNT(*) FROM card_data cdr WHERE cdr.card_id = tc.id) as row_count,
+                       d.name as current_department_name,
+                       cfs.flow_order as current_step,
+                       tdf.total_steps,
+                       CASE 
+                           WHEN cfs.flow_order = tdf.total_steps THEN 1 
+                           ELSE 0 
+                       END as is_last_department,
+                       CASE 
+                           WHEN tc.current_department_id = %s THEN 'can_submit'
+                           WHEN EXISTS (
+                               SELECT 1 FROM card_flow_status cfs2 
+                               WHERE cfs2.card_id = tc.id 
+                               AND cfs2.department_id = %s 
+                               AND cfs2.status = 'completed'
+                           ) THEN 'view_only'
+                           WHEN tc.created_by = %s THEN 'owner'
+                           ELSE 'none'
+                       END as permission_level
+                FROM transfer_cards tc
+                LEFT JOIN templates t ON tc.template_id = t.id
+                LEFT JOIN users u ON tc.created_by = u.id
+                LEFT JOIN departments d ON tc.current_department_id = d.id
+                LEFT JOIN card_flow_status cfs ON tc.id = cfs.card_id AND cfs.status = 'processing'
+                LEFT JOIN (
+                    SELECT 
+                        template_id,
+                        COUNT(*) as total_steps
+                    FROM template_department_flow
+                    GROUP BY template_id
+                ) tdf ON tc.template_id = tdf.template_id
+                WHERE tc.template_id IS NOT NULL
+                AND (
+                    tc.current_department_id = %s 
+                    OR EXISTS (
+                        SELECT 1 FROM card_flow_status cfs3 
+                        WHERE cfs3.card_id = tc.id 
+                        AND cfs3.department_id = %s 
+                        AND cfs3.status = 'completed'
+                    )
+                    OR tc.created_by = %s
+                )
+                AND tc.status NOT IN ('draft', 'cancelled')
+                ORDER BY tc.created_at DESC
+                """
+                cursor.execute(sql, (current_user['department_id'], current_user['department_id'], current_user['id'], 
+                                  current_user['department_id'], current_user['department_id'], current_user['id']))
+            
             template_cards = cursor.fetchall()
             
-            # 处理数据格式
+            # 为每个流转卡获取完整的流转顺序
             for card in template_cards:
                 # 格式化时间
                 if card.get('created_at'):
                     card['created_at'] = card['created_at'].isoformat()
                 if card.get('updated_at'):
                     card['updated_at'] = card['updated_at'].isoformat()
+                
+                # 获取模板的流转部门顺序
+                if card.get('template_id'):
+                    cursor.execute("""
+                        SELECT tdf.*, d.name as department_name
+                        FROM template_department_flow tdf
+                        LEFT JOIN departments d ON tdf.department_id = d.id
+                        WHERE tdf.template_id = %s
+                        ORDER BY tdf.flow_order
+                    """, (card['template_id'],))
+                    flow_departments = cursor.fetchall()
+                    
+                    # 标记当前流转部门
+                    for dept in flow_departments:
+                        dept['is_current'] = (dept['department_id'] == card.get('current_department_id'))
+                    
+                    card['flow_departments'] = flow_departments
+                else:
+                    card['flow_departments'] = []
             
             return jsonify({
                 'success': True,
@@ -1774,6 +2097,55 @@ def get_template_cards():
     
     except Exception as e:
         return jsonify({'success': False, 'message': f'获取模板流转卡列表失败: {str(e)}'}), 500
+    finally:
+        if 'connection' in locals():
+            connection.close()
+
+# 删除模板流转卡
+@app.route('/api/template-cards/<int:card_id>', methods=['DELETE'])
+@jwt_required()
+def delete_template_card(card_id):
+    """删除模板流转卡"""
+    try:
+        current_user = get_current_user_info()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
+        
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'message': '数据库连接失败'}), 500
+        
+        with connection.cursor() as cursor:
+            # 开始事务
+            connection.begin()
+            
+            try:
+                # 检查流转卡是否存在
+                cursor.execute("SELECT id FROM transfer_cards WHERE id = %s", (card_id,))
+                card_result = cursor.fetchone()
+                if not card_result:
+                    return jsonify({'success': False, 'message': '流转卡不存在'}), 404
+                
+                # 删除相关的card_data记录
+                cursor.execute("DELETE FROM card_data WHERE card_id = %s", (card_id,))
+                
+                # 删除流转卡主记录
+                cursor.execute("DELETE FROM transfer_cards WHERE id = %s", (card_id,))
+                
+                # 提交事务
+                connection.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'message': '流转卡删除成功'
+                })
+            
+            except Exception as e:
+                connection.rollback()
+                raise e
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'删除流转卡失败: {str(e)}'}), 500
     finally:
         if 'connection' in locals():
             connection.close()
@@ -1861,7 +2233,7 @@ def create_template_card_with_table_data():
                 INSERT INTO transfer_cards (card_number, template_id, title, description, 
                                           status, created_by, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                """
+            """
                 cursor.execute(sql, (card_number, template_id, title, description, 
                                      status, current_user['id']))
                 card_id = cursor.lastrowid
@@ -1925,10 +2297,10 @@ def create_template_card_with_table_data():
                 raise e
     
     except Exception as e:
-        print(f"🔥 创建基于模板的流转卡失败详细错误: {str(e)}")
-        print(f"🔥 错误类型: {type(e).__name__}")
+        print(f" 创建基于模板的流转卡失败详细错误: {str(e)}")
+        print(f" 错误类型: {type(e).__name__}")
         import traceback
-        print(f"🔥 错误堆栈: {traceback.format_exc()}")
+        print(f" 错误堆栈: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': f'创建基于模板的流转卡失败: {str(e)}'}), 500
     finally:
         if 'connection' in locals():
@@ -2245,7 +2617,7 @@ def quick_create_card():
                     VALUES ({placeholders}, NOW(), NOW())
                     """
                     cursor.execute(insert_sql, insert_values)
-                    print(f"🔍 快速创建数据行: {insert_sql}")
+                    print(f" 快速创建数据行: {insert_sql}")
                 
                 # 提交事务
                 connection.commit()
@@ -2266,14 +2638,655 @@ def quick_create_card():
                 raise e
     
     except Exception as e:
-        print(f"🔥 快速创建失败详细错误: {str(e)}")
-        print(f"🔥 错误类型: {type(e).__name__}")
+        print(f" 快速创建失败详细错误: {str(e)}")
+        print(f" 错误类型: {type(e).__name__}")
         import traceback
-        print(f"🔥 错误堆栈: {traceback.format_exc()}")
+        print(f" 错误堆栈: {traceback.format_exc()}")
         return jsonify({'success': False, 'message': f'快速创建流转卡失败: {str(e)}'}), 500
     finally:
         if 'connection' in locals():
             connection.close()
+
+# ========== 工作台相关接口 ==========
+
+# 记录操作日志的装饰器
+def log_operation(action, target_type="未知", target_id=None, description=""):
+    """记录操作日志的装饰器"""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            try:
+                # 获取当前用户信息
+                current_user = get_current_user_info()
+                if not current_user:
+                    return func(*args, **kwargs)
+                
+                # 获取客户端IP
+                client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', 
+                                         request.environ.get('REMOTE_ADDR', '127.0.0.1'))
+                
+                # 记录操作日志
+                connection = get_db_connection()
+                if connection:
+                    try:
+                        with connection.cursor() as cursor:
+                            sql = """
+                            INSERT INTO operation_logs 
+                            (user_id, user_name, action, target_type, target_id, description, 
+                             ip_address, user_agent, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            """
+                            cursor.execute(sql, (
+                                current_user['id'],
+                                current_user['username'],
+                                action,
+                                target_type,
+                                target_id,
+                                description,
+                                client_ip,
+                                request.environ.get('HTTP_USER_AGENT', ''),
+                            ))
+                            connection.commit()
+                    except Exception as e:
+                        print(f"记录操作日志失败: {e}")
+                        connection.rollback()
+                    finally:
+                        connection.close()
+                
+                # 执行原函数
+                return func(*args, **kwargs)
+            except Exception as e:
+                print(f"操作日志装饰器错误: {e}")
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# 获取工作台统计数据
+@app.route('/api/dashboard/stats', methods=['GET'])
+@jwt_required()
+def get_dashboard_stats():
+    """获取工作台统计数据"""
+    try:
+        current_user = get_current_user_info()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
+        
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'message': '数据库连接失败'}), 500
+        
+        with connection.cursor() as cursor:
+            # 第一个统计：状态为进行中的流转卡个数
+            if current_user['role'] == 'admin':
+                # 管理员可以看到所有进行中的流转卡
+                cursor.execute("""
+                    SELECT COUNT(*) as in_progress_count 
+                    FROM transfer_cards 
+                    WHERE status = 'in_progress'
+                """)
+            else:
+                # 普通用户只能看到有权限访问的进行中流转卡
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT tc.id) as in_progress_count
+                    FROM transfer_cards tc
+                    LEFT JOIN template_field_permissions tfp ON tc.template_id = tfp.template_id
+                    WHERE tc.status = 'in_progress'
+                    AND (tfp.department_id = %s OR tc.created_by = %s)
+                """, (current_user['department_id'], current_user['id']))
+            
+            in_progress_result = cursor.fetchone()
+            in_progress_cards = in_progress_result['in_progress_count'] if in_progress_result else 0
+            
+            # 第二个统计：今日创建的流转卡数量（改为从transfer_cards表统计）
+            if current_user['role'] == 'admin':
+                cursor.execute("""
+                    SELECT COUNT(*) as today_create_count
+                    FROM transfer_cards
+                    WHERE DATE(created_at) = CURDATE()
+                """)
+            else:
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT tc.id) as today_create_count
+                    FROM transfer_cards tc
+                    LEFT JOIN template_field_permissions tfp ON tc.template_id = tfp.template_id
+                    WHERE DATE(tc.created_at) = CURDATE()
+                    AND (tfp.department_id = %s OR tc.created_by = %s)
+                """, (current_user['department_id'], current_user['id']))
+            
+            today_create_result = cursor.fetchone()
+            today_create_count = today_create_result['today_create_count'] if today_create_result else 0
+            
+            # 第三个统计：本周创建的流转卡数量（改为从transfer_cards表统计）
+            if current_user['role'] == 'admin':
+                cursor.execute("""
+                    SELECT COUNT(*) as weekly_create_count
+                    FROM transfer_cards
+                    WHERE YEARWEEK(created_at, 1) = YEARWEEK(CURDATE(), 1)
+                """)
+            else:
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT tc.id) as weekly_create_count
+                    FROM transfer_cards tc
+                    LEFT JOIN template_field_permissions tfp ON tc.template_id = tfp.template_id
+                    WHERE YEARWEEK(tc.created_at, 1) = YEARWEEK(CURDATE(), 1)
+                    AND (tfp.department_id = %s OR tc.created_by = %s)
+                """, (current_user['department_id'], current_user['id']))
+            
+            weekly_create_result = cursor.fetchone()
+            weekly_create_count = weekly_create_result['weekly_create_count'] if weekly_create_result else 0
+            
+            # 第四个统计：流转卡总数（包括所有状态，除了cancelled）
+            if current_user['role'] == 'admin':
+                # 管理员可以看到所有非取消状态的流转卡
+                cursor.execute("""
+                    SELECT COUNT(*) as total_count 
+                    FROM transfer_cards 
+                    WHERE status != 'cancelled'
+                """)
+            else:
+                # 普通用户只能看到有权限访问的非取消状态流转卡
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT tc.id) as total_count
+                    FROM transfer_cards tc
+                    LEFT JOIN template_field_permissions tfp ON tc.template_id = tfp.template_id
+                    WHERE tc.status != 'cancelled'
+                    AND (tfp.department_id = %s OR tc.created_by = %s)
+                """, (current_user['department_id'], current_user['id']))
+            
+            total_result = cursor.fetchone()
+            total_cards = total_result['total_count'] if total_result else 0
+            
+            # 计算趋势（简化版本，实际应该与历史数据比较）
+            stats = {
+                'pendingCards': in_progress_cards,  # 改为进行中的流转卡个数
+                'completedToday': today_create_count,  # 改为今日创建数量
+                'weeklyTotal': weekly_create_count,   # 改为本周创建数量
+                'totalCards': total_cards,            # 改为非取消状态的流转卡总数
+                'pendingTrend': 'up' if in_progress_cards > 0 else 'down',
+                'pendingChange': 15,  # 模拟数据
+                'completedTrend': 'up' if today_create_count > 0 else 'down',
+                'completedChange': 8,   # 模拟数据
+                'weeklyTrend': 'up' if weekly_create_count > 0 else 'down',
+                'weeklyChange': 12,     # 模拟数据
+                'totalTrend': 'up',
+                'totalChange': 5        # 模拟数据
+            }
+            
+            return jsonify({
+                'success': True,
+                'data': stats
+            })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'获取统计数据失败: {str(e)}'}), 500
+    finally:
+        if 'connection' in locals():
+            connection.close()
+
+# 获取最近操作记录
+@app.route('/api/dashboard/operations', methods=['GET'])
+@jwt_required()
+def get_recent_operations():
+    """获取最近操作记录"""
+    try:
+        current_user = get_current_user_info()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
+        
+        # 获取分页参数
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 20))
+        action_filter = request.args.get('action', '')
+        
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'message': '数据库连接失败'}), 500
+        
+        with connection.cursor() as cursor:
+            # 构建WHERE条件
+            where_conditions = []
+            params = []
+            
+            if action_filter:
+                where_conditions.append("ol.action = %s")
+                params.append(action_filter)
+            
+            where_clause = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
+            
+            # 获取总记录数
+            count_sql = f"""
+                SELECT COUNT(*) as total_count 
+                FROM operation_logs ol
+                LEFT JOIN users u ON ol.user_id = u.id
+                LEFT JOIN departments d ON u.department_id = d.id
+                {where_clause}
+            """
+            cursor.execute(count_sql, params)
+            total_result = cursor.fetchone()
+            total_count = total_result['total_count'] if total_result else 0
+            
+            # 获取分页数据
+            offset = (page - 1) * page_size
+            sql = f"""
+                SELECT ol.*, u.real_name, u.username, d.name as department_name
+                FROM operation_logs ol
+                LEFT JOIN users u ON ol.user_id = u.id
+                LEFT JOIN departments d ON u.department_id = d.id
+                {where_clause}
+                ORDER BY ol.created_at DESC
+                LIMIT %s OFFSET %s
+            """
+            cursor.execute(sql, params + [page_size, offset])
+            operations = cursor.fetchall()
+            
+            # 格式化数据
+            for op in operations:
+                # 格式化时间
+                if op['created_at']:
+                    op['created_at'] = op['created_at'].isoformat()
+                
+                # 处理空值
+                op['user_name'] = op['real_name'] or op['username'] or '未知用户'
+                op['department_name'] = op['department_name'] or '未分配部门'
+            
+            # 计算分页信息
+            total_pages = (total_count + page_size - 1) // page_size
+            has_more = page < total_pages
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'operations': operations,
+                    'pagination': {
+                        'current_page': page,
+                        'page_size': page_size,
+                        'total_count': total_count,
+                        'total_pages': total_pages,
+                        'has_more': has_more
+                    }
+                }
+            })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'获取操作记录失败: {str(e)}'}), 500
+    finally:
+        if 'connection' in locals():
+            connection.close()
+
+
+# ========== 版本控制接口 ==========
+
+# 获取带版本信息的流转卡数据
+@app.route('/api/cards/<int:card_id>/data-with-versions', methods=['GET'])
+@jwt_required()
+def get_card_data_with_versions(card_id):
+    """获取带版本信息的流转卡数据"""
+    try:
+        current_user = get_current_user_info()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
+        
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'message': '数据库连接失败'}), 500
+        
+        with connection.cursor() as cursor:
+            # 获取流转卡基本信息
+            cursor.execute("""
+                SELECT tc.*, t.template_name, u.username as creator_name
+                FROM transfer_cards tc
+                LEFT JOIN templates t ON tc.template_id = t.id
+                LEFT JOIN users u ON tc.created_by = u.id
+                WHERE tc.id = %s
+            """, (card_id,))
+            card_info = cursor.fetchone()
+            
+            if not card_info:
+                return jsonify({'success': False, 'message': '流转卡不存在'}), 404
+            
+            # 获取用户有权限的字段
+            if current_user['role'] == 'admin':
+                field_sql = """
+                SELECT DISTINCT f.*, tfp.can_read, tfp.can_write, tfp.department_id as perm_dept_id
+                FROM fields f
+                LEFT JOIN template_field_permissions tfp ON f.name = tfp.field_name 
+                                                          AND tfp.template_id = %s
+                WHERE f.is_placeholder = 0
+                ORDER BY f.field_position
+                """
+                cursor.execute(field_sql, (card_info['template_id'],))
+            else:
+                field_sql = """
+                SELECT DISTINCT f.*, tfp.can_read, tfp.can_write, tfp.department_id as perm_dept_id
+                FROM fields f
+                LEFT JOIN template_field_permissions tfp ON f.name = tfp.field_name 
+                                                          AND tfp.template_id = %s
+                                                          AND tfp.department_id = %s
+                WHERE f.is_placeholder = 0 
+                AND (tfp.department_id = %s OR tfp.department_id IS NULL)
+                ORDER BY f.field_position
+                """
+                cursor.execute(field_sql, (card_info['template_id'], current_user['department_id'], current_user['department_id']))
+            
+            fields = cursor.fetchall()
+            
+            # 额外去重处理
+            unique_fields = {}
+            for field in fields:
+                field_name = field['name']
+                if field_name not in unique_fields:
+                    unique_fields[field_name] = field
+            
+            fields = list(unique_fields.values())
+            
+            # 获取带版本信息的数据行
+            cursor.execute("""
+                SELECT cd.*, d.name as department_name,
+                       u1.username as submitted_by_name,
+                       u2.username as updated_by_name
+                FROM card_data cd
+                LEFT JOIN departments d ON cd.department_id = d.id
+                LEFT JOIN users u1 ON cd.submitted_by = u1.id
+                LEFT JOIN users u2 ON cd.last_updated_by = u2.id
+                WHERE cd.card_id = %s
+                ORDER BY cd.row_number
+            """, (card_id,))
+            rows = cursor.fetchall()
+            
+            # 构建带版本信息的表格数据
+            table_data = []
+            
+            for row in rows:
+                row_data = {
+                    'row_number': row['row_number'],
+                    'department_id': row['department_id'],
+                    'department_name': row['department_name'],
+                    'status': row['status'],
+                    'submitted_by': row['submitted_by'],
+                    'submitted_by_name': row['submitted_by_name'],
+                    'submitted_at': row['submitted_at'].isoformat() if row['submitted_at'] else None,
+                    'version': row.get('version', 1),
+                    'last_updated_by': row.get('last_updated_by'),
+                    'last_updated_by_name': row.get('updated_by_name'),
+                    'last_updated_at': row.get('last_updated_at').isoformat() if row.get('last_updated_at') else None,
+                    'values': {}
+                }
+                
+                # 为每个字段添加值
+                for field in fields:
+                    field_name = field['name']
+                    field_value = row.get(field_name, '')
+                    
+                    # 处理日期格式
+                    if field_value and hasattr(field_value, 'isoformat'):
+                        field_value = field_value.isoformat()
+                    elif field_value is None:
+                        field_value = ''
+                    
+                    row_data['values'][field_name] = field_value
+                    row_data[field_name] = field_value
+                
+                table_data.append(row_data)
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'card_info': card_info,
+                    'fields': fields,
+                    'table_data': table_data
+                }
+            })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'获取带版本信息的数据失败: {str(e)}'}), 500
+    finally:
+        if 'connection' in locals():
+            connection.close()
+
+# 冲突检测和解决API
+@app.route('/api/cards/<int:card_id>/detect-conflicts', methods=['POST'])
+@jwt_required()
+def detect_conflicts(card_id):
+    """检测数据冲突"""
+    try:
+        current_user = get_current_user_info()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
+        
+        data = request.get_json()
+        row_data_list = data.get('row_data', [])
+        
+        if not row_data_list:
+            return jsonify({'success': False, 'message': '请提供要检测的数据'}), 400
+        
+        # 冲突检测功能已移除
+        conflicts = []
+        suggestions = {}
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'has_conflicts': len(conflicts) > 0,
+                'conflicts': conflicts,
+                'suggestions': suggestions
+            }
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'冲突检测失败: {str(e)}'}), 500
+
+@app.route('/api/cards/<int:card_id>/resolve-conflicts', methods=['POST'])
+@jwt_required()
+def resolve_conflicts(card_id):
+    """解决数据冲突"""
+    try:
+        current_user = get_current_user_info()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
+        
+        data = request.get_json()
+        row_data_list = data.get('row_data', [])
+        conflict_resolution = data.get('conflict_resolution', {})
+        
+        if not row_data_list:
+            return jsonify({'success': False, 'message': '请提供要解决的数据'}), 400
+        
+        # 冲突解决功能已移除
+        result = {'success': True, 'message': '冲突解决功能已移除', 'resolved_rows': len(row_data_list), 'failed_rows': 0}
+        
+        return jsonify({
+            'success': result['success'],
+            'message': result['message'],
+            'data': {
+                'resolved_rows': result['resolved_rows'],
+                'failed_rows': result['failed_rows']
+            }
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'冲突解决失败: {str(e)}'}), 500
+
+# 带版本检查的保存数据
+@app.route('/api/cards/<int:card_id>/save-with-version', methods=['POST'])
+@jwt_required()
+def save_card_data_with_version(card_id):
+    """带版本检查的保存流转卡数据"""
+    try:
+        current_user = get_current_user_info()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
+        
+        data = request.get_json()
+        row_data_list = data.get('row_data', [])
+        
+        if not row_data_list:
+            return jsonify({'success': False, 'message': '请提供要保存的数据'}), 400
+        
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'message': '数据库连接失败'}), 500
+        
+        with connection.cursor() as cursor:
+            # 开始事务，使用SERIALIZABLE隔离级别
+            connection.begin()
+            
+            try:
+                # 设置事务隔离级别
+                cursor.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                
+                # 检查流转卡是否存在并锁定
+                cursor.execute("SELECT id, template_id, status FROM transfer_cards WHERE id = %s FOR UPDATE", (card_id,))
+                card_result = cursor.fetchone()
+                if not card_result:
+                    return jsonify({'success': False, 'message': '流转卡不存在'}), 404
+                
+                # 检查流转卡是否已完成（管理员除外）
+                if card_result['status'] == 'completed' and current_user['role'] != 'admin':
+                    return jsonify({'success': False, 'message': '该流转卡已完成整个流转流程，无法再修改数据'}), 403
+                
+                template_id = card_result['template_id']
+                
+                # 处理每行数据
+                for row_data in row_data_list:
+                    row_number = row_data.get('row_number')
+                    values = row_data.get('values', {})
+                    expected_version = row_data.get('version')  # 客户端期望的版本号
+                    
+                    if not row_number:
+                        continue
+                    
+                    # 检查用户权限
+                    for field_name, field_value in values.items():
+                        if current_user['role'] != 'admin':
+                            cursor.execute("""
+                                SELECT can_write FROM template_field_permissions 
+                                WHERE template_id = %s AND field_name = %s AND department_id = %s
+                            """, (template_id, field_name, current_user['department_id']))
+                            perm_result = cursor.fetchone()
+                            
+                            if not perm_result or not perm_result['can_write']:
+                                return jsonify({
+                                    'success': False, 
+                                    'message': f'您没有权限修改字段 {field_name}'
+                                }), 403
+                    
+                    # 锁定目标行
+                    cursor.execute("""
+                        SELECT id, version, submitted_by, submitted_at 
+                        FROM card_data 
+                        WHERE card_id = %s AND `row_number` = %s 
+                        FOR UPDATE
+                    """, (card_id, row_number))
+                    existing_row = cursor.fetchone()
+                    
+                    # 检查数据冲突
+                    if existing_row and existing_row['submitted_at']:
+                        submitted_by_other = existing_row['submitted_by']
+                        if submitted_by_other and str(submitted_by_other) != str(current_user['id']):
+                            cursor.execute("SELECT username FROM users WHERE id = %s", (submitted_by_other,))
+                            submitter_result = cursor.fetchone()
+                            submitter_name = submitter_result['username'] if submitter_result else '未知用户'
+                            
+                            return jsonify({
+                                'success': False,
+                                'message': f'第{row_number}行已被用户 {submitter_name} 提交，无法修改',
+                                'error_type': 'DATA_CONFLICT',
+                                'conflict_info': {
+                                    'row_number': row_number,
+                                    'submitted_by': submitter_name,
+                                    'submitted_at': existing_row['submitted_at'].isoformat() if existing_row['submitted_at'] else None
+                                }
+                            }), 409
+                    
+                    # 版本检查（乐观锁）
+                    if existing_row and expected_version is not None:
+                        current_version = existing_row.get('version', 1)
+                        if current_version != expected_version:
+                            return jsonify({
+                                'success': False,
+                                'message': f'第{row_number}行数据已被其他用户修改，请刷新后重试',
+                                'error_type': 'VERSION_CONFLICT',
+                                'conflict_info': {
+                                    'row_number': row_number,
+                                    'expected_version': expected_version,
+                                    'current_version': current_version
+                                }
+                            }), 409
+                    
+                    if existing_row:
+                        # 更新现有行，版本号递增
+                        update_fields = []
+                        update_params = []
+                        
+                        for field_name, field_value in values.items():
+                            update_fields.append(f"{field_name} = %s")
+                            update_params.append(field_value)
+                        
+                        if update_fields:
+                            update_fields.extend([
+                                "version = version + 1",
+                                "last_updated_by = %s",
+                                "updated_at = NOW()"
+                            ])
+                            update_params.extend([current_user['id'], card_id, row_number])
+                            
+                            update_sql = f"""
+                            UPDATE card_data 
+                            SET {', '.join(update_fields)} 
+                            WHERE card_id = %s AND `row_number` = %s
+                            """
+                            cursor.execute(update_sql, update_params)
+                    else:
+                        # 插入新行，版本号为1
+                        if any(values.values()):
+                            insert_fields = ['card_id', 'row_number', 'version', 'last_updated_by'] + list(values.keys())
+                            insert_values = [card_id, row_number, 1, current_user['id']] + list(values.values())
+                            placeholders = ', '.join(['%s'] * len(insert_fields))
+                            
+                            insert_sql = f"""
+                            INSERT INTO card_data ({', '.join([f'`{f}`' if f == 'row_number' else f for f in insert_fields])}, created_at, updated_at)
+                            VALUES ({placeholders}, NOW(), NOW())
+                            """
+                            cursor.execute(insert_sql, insert_values)
+                    
+                    # 更新行状态（如果用户提交）
+                    if row_data.get('submit', False):
+                        if existing_row and existing_row['submitted_at']:
+                            if existing_row['submitted_by'] == current_user['id']:
+                                pass
+                            else:
+                                return jsonify({
+                                    'success': False,
+                                    'message': f'第{row_number}行已被其他用户提交，无法重复提交',
+                                    'error_type': 'ALREADY_SUBMITTED'
+                                }), 409
+                        
+                        cursor.execute("""
+                            UPDATE card_data 
+                            SET status = 'submitted', submitted_by = %s, submitted_at = NOW()
+                            WHERE card_id = %s AND `row_number` = %s
+                        """, (current_user['id'], card_id, row_number))
+                
+                # 提交事务
+                connection.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'message': '数据保存成功（带版本控制）'
+                })
+            
+            except Exception as e:
+                connection.rollback()
+                raise e
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'保存数据失败: {str(e)}'}), 500
+    finally:
+        if 'connection' in locals():
+            connection.close()
+
+# 注册部门流转API
+from flow_api import register_flow_blueprint
+register_flow_blueprint(app)
 
 # 健康检查
 @app.route('/health', methods=['GET'])

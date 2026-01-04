@@ -64,47 +64,183 @@
             </el-header>
             
             <el-main :class="{ 'admin-page': isAdmin }">
-                <!-- 工作台页面 -->
+                <!-- 工作台页面 - 优化版本 -->
                 <div v-if="activeMenu === 'dashboard'">
-                    <h2>工作台</h2>
-                    <el-row :gutter="20">
-                        <el-col :span="8">
-                            <el-card>
-                                <div slot="header">
-                                    <span>我的流转卡</span>
+                    <!-- 页面标题 -->
+                    <div class="dashboard-header">
+                        <h2>工作台</h2>
+                        <p>欢迎使用流转卡管理系统，实时掌握工作动态</p>
+                    </div>
+
+
+                    <!-- 统计卡片区域 -->
+                    <div class="dashboard-stats">
+                        <el-row :gutter="20">
+                            <el-col :span="6">
+                                <div class="stat-card">
+                                    <div class="stat-icon pending">
+                                        <i class="el-icon-time"></i>
+                                    </div>
+                                    <div class="stat-content">
+                                        <div class="stat-number">{{ dashboardData.pendingCards }}</div>
+                                        <div class="stat-label">进行中</div>
+                                        <div class="stat-trend" :class="dashboardData.pendingTrend">
+                                            <i :class="dashboardData.pendingTrend === 'up' ? 'el-icon-arrow-up' : 'el-icon-arrow-down'"></i>
+                                            {{ dashboardData.pendingChange }}%
+                                        </div>
+                                    </div>
                                 </div>
-                                <el-statistic title="待处理" :value="dashboardData.pendingCards" />
+                            </el-col>
+                            <el-col :span="6">
+                                <div class="stat-card">
+                                    <div class="stat-icon completed">
+                                        <i class="el-icon-check"></i>
+                                    </div>
+                                    <div class="stat-content">
+                                        <div class="stat-number">{{ dashboardData.completedToday }}</div>
+                                        <div class="stat-label">今日提交</div>
+                                        <div class="stat-trend" :class="dashboardData.completedTrend">
+                                            <i :class="dashboardData.completedTrend === 'up' ? 'el-icon-arrow-up' : 'el-icon-arrow-down'"></i>
+                                            {{ dashboardData.completedChange }}%
+                                        </div>
+                                    </div>
+                                </div>
+                            </el-col>
+                            <el-col :span="6">
+                                <div class="stat-card">
+                                    <div class="stat-icon weekly">
+                                        <i class="el-icon-data-line"></i>
+                                    </div>
+                                    <div class="stat-content">
+                                        <div class="stat-number">{{ dashboardData.weeklyTotal }}</div>
+                                        <div class="stat-label">本月提交</div>
+                                        <div class="stat-trend" :class="dashboardData.weeklyTrend">
+                                            <i :class="dashboardData.weeklyTrend === 'up' ? 'el-icon-arrow-up' : 'el-icon-arrow-down'"></i>
+                                            {{ dashboardData.weeklyChange }}%
+                                        </div>
+                                    </div>
+                                </div>
+                            </el-col>
+                            <el-col :span="6">
+                                <div class="stat-card">
+                                    <div class="stat-icon total">
+                                        <i class="el-icon-document"></i>
+                                    </div>
+                                    <div class="stat-content">
+                                        <div class="stat-number">{{ dashboardData.totalCards }}</div>
+                                        <div class="stat-label">流转卡总数</div>
+                                        <div class="stat-trend" :class="dashboardData.totalTrend">
+                                            <i :class="dashboardData.totalTrend === 'up' ? 'el-icon-arrow-up' : 'el-icon-arrow-down'"></i>
+                                            {{ dashboardData.totalChange }}%
+                                        </div>
+                                    </div>
+                                </div>
+                            </el-col>
+                        </el-row>
+                    </div>
+
+                    <!-- 主要内容区域 -->
+                    <el-row :gutter="20" style="margin-top: 20px;">
+                        <!-- 最近操作记录 -->
+                        <el-col :span="16">
+                            <el-card class="dashboard-card">
+                                <div slot="header" class="card-header">
+                                    <div class="header-left">
+                                        <i class="el-icon-time"></i>
+                                        <span>最近操作记录</span>
+                                    </div>
+                                    <div class="header-right">
+                                        <el-button size="mini" @click="refreshRecentOperations">
+                                            <i class="el-icon-refresh"></i> 刷新
+                                        </el-button>
+                                        <el-select v-model="operationFilter" size="mini" style="width: 120px;">
+                                            <el-option label="全部" value=""></el-option>
+                                            <el-option label="创建" value="创建"></el-option>
+                                            <el-option label="编辑" value="编辑"></el-option>
+                                            <el-option label="删除" value="删除"></el-option>
+                                            <el-option label="查看" value="查看"></el-option>
+                                        </el-select>
+                                    </div>
+                                </div>
+                                <div class="operations-container">
+                                    <div v-if="loadingOperations" class="loading-placeholder">
+                                        <i class="el-icon-loading"></i> 加载中...
+                                    </div>
+                                    <div v-else-if="filteredRecentOperations.length === 0" class="empty-placeholder">
+                                        <i class="el-icon-document-remove"></i>
+                                        <p>暂无操作记录</p>
+                                    </div>
+                                    <div v-else class="operations-list">
+                                        <div v-for="(operation, index) in filteredRecentOperations" :key="index" class="operation-item">
+                                            <div class="operation-avatar">
+                                                <img :src="getUserAvatar(operation.user_name)" :alt="operation.user_name">
+                                                <span class="user-status" :class="getUserStatus(operation.user_name)"></span>
+                                            </div>
+                                            <div class="operation-content">
+                                                <div class="operation-header">
+                                                    <span class="user-name">{{ operation.user_name }}</span>
+                                                    <span class="action-type" :class="getActionTypeClass(operation.action)">{{ operation.action }}</span>
+                                                    <span class="operation-time">{{ formatOperationTime(operation.created_at) }}</span>
+                                                </div>
+                                                <div class="operation-details">
+                                                    <span class="target-info">{{ operation.target_type || '流转卡' }}</span>
+                                                    <span class="card-number" v-if="operation.card_number">{{ operation.card_number }}</span>
+                                                    <span class="description">{{ operation.description }}</span>
+                                                </div>
+                                                <div class="operation-meta">
+                                                    <el-tag size="mini" :type="getDepartmentTagType(operation.department_name)" v-if="operation.department_name">
+                                                        {{ operation.department_name }}
+                                                    </el-tag>
+                                                    <span class="ip-address" v-if="operation.ip_address">{{ operation.ip_address }}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-if="hasMoreOperations" class="load-more">
+                                        <el-button type="text" @click="loadMoreOperations">加载更多</el-button>
+                                    </div>
+                                </div>
                             </el-card>
                         </el-col>
+
+                        <!-- 侧边栏信息 -->
                         <el-col :span="8">
-                            <el-card>
-                                <div slot="header">
-                                    <span>已完成</span>
+                            <!-- 快捷操作 -->
+                            <el-card class="dashboard-card quick-actions">
+                                <div slot="header" class="card-header">
+                                    <i class="el-icon-s-operation"></i>
+                                    <span>快捷操作</span>
                                 </div>
-                                <el-statistic title="今日完成" :value="dashboardData.completedToday" />
-                            </el-card>
-                        </el-col>
-                        <el-col :span="8">
-                            <el-card>
-                                <div slot="header">
-                                    <span>本周统计</span>
+                                <div class="quick-actions-grid">
+                                    <div class="quick-action-item" @click="handleQuickAction('create')" v-if="canCreateCard">
+                                        <div class="action-icon create">
+                                            <i class="el-icon-plus"></i>
+                                        </div>
+                                        <div class="action-text">创建流转卡</div>
+                                    </div>
+                                    <div class="quick-action-item" @click="handleQuickAction('view')">
+                                        <div class="action-icon view">
+                                            <i class="el-icon-view"></i>
+                                        </div>
+                                        <div class="action-text">查看流转卡</div>
+                                    </div>
+                                    <div class="quick-action-item" @click="handleQuickAction('manage')" v-if="isAdmin">
+                                        <div class="action-icon manage">
+                                            <i class="el-icon-setting"></i>
+                                        </div>
+                                        <div class="action-text">模板管理</div>
+                                    </div>
+                                    <div class="quick-action-item" @click="handleQuickAction('report')">
+                                        <div class="action-icon report">
+                                            <i class="el-icon-data-analysis"></i>
+                                        </div>
+                                        <div class="action-text">数据统计</div>
+                                    </div>
                                 </div>
-                                <el-statistic title="本周处理" :value="dashboardData.weeklyTotal" />
                             </el-card>
+
                         </el-col>
                     </el-row>
-                    
-                    <el-card style="margin-top: 20px;">
-                        <div slot="header">
-                            <span>最近操作</span>
-                        </div>
-                        <el-table :data="recentOperations" style="width: 100%">
-                            <el-table-column prop="card_number" label="流转卡号" width="150"></el-table-column>
-                            <el-table-column prop="action" label="操作" width="100"></el-table-column>
-                            <el-table-column prop="description" label="描述"></el-table-column>
-                            <el-table-column prop="created_at" label="时间" width="180"></el-table-column>
-                        </el-table>
-                    </el-card>
                 </div>
                 
                 <!-- 流转卡管理页面 - 重新设计 -->
@@ -158,32 +294,68 @@
                                 </template>
                             </el-table-column>
                             <el-table-column prop="template_name" label="模板" width="150" show-overflow-tooltip></el-table-column>
-                            <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip></el-table-column>
-                            <el-table-column prop="row_count" label="数据行数" width="100" align="center">
+                            <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip></el-table-column>
+                            <el-table-column label="流转顺序" width="300" show-overflow-tooltip>
+                                <template slot-scope="scope">
+                                    <div v-if="scope.row.flow_departments && scope.row.flow_departments.length > 0" class="flow-path">
+                                        <el-tag 
+                                            v-for="(dept, index) in scope.row.flow_departments" 
+                                            :key="index" 
+                                            size="mini"
+                                            :type="dept.is_current ? 'danger' : 'primary'"
+                                            :effect="dept.is_current ? 'dark' : 'plain'"
+                                            style="margin-right: 4px;">
+                                            {{ index + 1 }}. {{ dept.department_name }}
+                                        </el-tag>
+                                    </div>
+                                    <span v-else style="color: #999;">未设置流转顺序</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="当前部门" width="120" align="center">
+                                <template slot-scope="scope">
+                                    <el-tag v-if="scope.row.current_department_name" type="warning" size="small">
+                                        {{ scope.row.current_department_name }}
+                                    </el-tag>
+                                    <span v-else style="color: #999;">-</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column prop="row_count" label="数据行数" width="90" align="center">
                                 <template slot-scope="scope">
                                     <el-badge :value="scope.row.row_count || 0" class="item" type="primary">
                                         <span>{{ scope.row.row_count || 0 }}</span>
                                     </el-badge>
                                 </template>
                             </el-table-column>
-                            <el-table-column prop="status" label="状态" width="100" align="center">
+                            <el-table-column prop="status" label="状态" width="90" align="center">
                                 <template slot-scope="scope">
                                     <el-tag :type="getStatusType(scope.row.status)" size="small">
                                         {{ getStatusText(scope.row.status) }}
                                     </el-tag>
                                 </template>
                             </el-table-column>
-                            <el-table-column prop="creator_name" label="创建人" width="100"></el-table-column>
-                            <el-table-column prop="created_at" label="创建时间" width="160" sortable>
+                            <el-table-column prop="creator_name" label="创建人" width="90"></el-table-column>
+                            <el-table-column prop="created_at" label="创建时间" width="150" sortable>
                                 <template slot-scope="scope">
                                     {{ formatDateTime(scope.row.created_at) }}
                                 </template>
                             </el-table-column>
-                            <el-table-column label="操作" width="200" fixed="right">
+                            <el-table-column label="操作" width="300" fixed="right">
                                 <template slot-scope="scope">
-                                    <el-button size="mini" @click="viewCardDetail(scope.row)">查看</el-button>
-                                    <el-button size="mini" type="primary" @click="editCardData(scope.row)" v-if="canEditCard(scope.row)">填写数据</el-button>
-                                    <el-button size="mini" type="danger" @click="deleteTemplateCard(scope.row)" v-if="canDeleteCard(scope.row)">删除</el-button>
+                                    <div class="operation-column">
+                                        <el-button size="mini" @click="viewCardDetail(scope.row)">查看</el-button>
+                                        <el-button size="mini" type="primary" @click="editCardData(scope.row)" v-if="canEditCard(scope.row)">填写</el-button>
+                                        <!-- 最后一个部门显示"完成"按钮，其他部门显示"提交"按钮 -->
+                                        <el-button size="mini" type="success" @click="completeCardFromList(scope.row)" v-if="canSubmitCard(scope.row) && isLastDepartment(scope.row)">
+                                            <i class="el-icon-check"></i> 完成
+                                        </el-button>
+                                        <el-button size="mini" type="success" @click="submitCardFromList(scope.row)" v-if="canSubmitCard(scope.row) && !isLastDepartment(scope.row)">
+                                            <i class="el-icon-right"></i> 提交
+                                        </el-button>
+                                        <el-button size="mini" type="info" @click="startCardFlow(scope.row)" v-if="canStartCardFlow(scope.row)">
+                                            <i class="el-icon-video-play"></i> 启动
+                                        </el-button>
+                                        <el-button size="mini" type="danger" @click="deleteTemplateCard(scope.row)" v-if="canDeleteCard(scope.row)">删除</el-button>
+                                    </div>
                                 </template>
                             </el-table-column>
                         </el-table>
@@ -380,8 +552,10 @@
                         <el-table-column prop="role" label="角色" width="100"></el-table-column>
                         <el-table-column label="操作" width="200">
                             <template slot-scope="scope">
-                                <el-button size="mini" @click="editUser(scope.row)">编辑</el-button>
-                                <el-button size="mini" type="danger" @click="deleteUser(scope.row)">删除</el-button>
+                                <div class="operation-column">
+                                    <el-button size="mini" @click="editUser(scope.row)">编辑</el-button>
+                                    <el-button size="mini" type="danger" @click="deleteUser(scope.row)">删除</el-button>
+                                </div>
                             </template>
                         </el-table-column>
                     </el-table>
@@ -398,8 +572,10 @@
                         <el-table-column prop="description" label="描述"></el-table-column>
                         <el-table-column label="操作" width="200">
                             <template slot-scope="scope">
-                                <el-button size="mini" @click="editDepartment(scope.row)">编辑</el-button>
-                                <el-button size="mini" type="danger" @click="deleteDepartment(scope.row)">删除</el-button>
+                                <div class="operation-column">
+                                    <el-button size="mini" @click="editDepartment(scope.row)">编辑</el-button>
+                                    <el-button size="mini" type="danger" @click="deleteDepartment(scope.row)">删除</el-button>
+                                </div>
                             </template>
                         </el-table-column>
                     </el-table>
@@ -452,12 +628,15 @@
                         </el-table-column>
                         <el-table-column prop="created_by" label="创建人" width="100"></el-table-column>
                         <el-table-column prop="created_at" label="创建时间" width="160"></el-table-column>
-                        <el-table-column label="操作" width="400" fixed="right">
+                        <el-table-column label="操作" width="500" fixed="right">
                             <template slot-scope="scope">
-                                <el-button size="mini" @click="editTemplate(scope.row)" style="margin-right: 5px;">编辑</el-button>
-                                <el-button size="mini" type="info" @click="manageTemplateFields(scope.row)" style="margin-right: 5px;">字段管理</el-button>
-                                <el-button size="mini" type="success" @click="createCardFromTemplate(scope.row)" style="margin-right: 5px;">创建流转卡</el-button>
-                                <el-button size="mini" type="danger" @click="deleteTemplate(scope.row)">删除</el-button>
+                                <div class="operation-column">
+                                    <el-button size="mini" @click="editTemplate(scope.row)">编辑</el-button>
+                                    <el-button size="mini" type="info" @click="manageTemplateFields(scope.row)">字段管理</el-button>
+                                    <el-button size="mini" type="primary" @click="openFlowSettings(scope.row)">流转设置</el-button>
+                                    <el-button size="mini" type="success" @click="createCardFromTemplate(scope.row)">创建流转卡</el-button>
+                                    <el-button size="mini" type="danger" @click="deleteTemplate(scope.row)">删除</el-button>
+                                </div>
                             </template>
                         </el-table-column>
                     </el-table>
@@ -527,9 +706,11 @@
                         </el-table-column>
                         <el-table-column label="操作" width="280" fixed="right">
                             <template slot-scope="scope">
-                                <el-button size="mini" @click="editField(scope.row)" style="margin-right: 5px;">编辑</el-button>
-                                <el-button size="mini" type="info" @click="viewFieldDetails(scope.row)" style="margin-right: 5px;">详情</el-button>
-                                <el-button size="mini" type="danger" @click="deleteField(scope.row)">删除</el-button>
+                                <div class="operation-column">
+                                    <el-button size="mini" @click="editField(scope.row)">编辑</el-button>
+                                    <el-button size="mini" type="info" @click="viewFieldDetails(scope.row)">详情</el-button>
+                                    <el-button size="mini" type="danger" @click="deleteField(scope.row)">删除</el-button>
+                                </div>
                             </template>
                         </el-table-column>
                     </el-table>
@@ -930,7 +1111,7 @@
         </el-dialog>
 
         <!-- 流转卡详情对话框 -->
-        <el-dialog title="流转卡详情" :visible.sync="cardDetailDialogVisible" width="95%" top="5vh">
+        <el-dialog title="流转卡详情" :visible.sync="cardDetailDialogVisible" width="95%" top="5vh" @close="closeCardDetailDialogWithCleanup">
             <div v-if="currentCardDetail">
                 <!-- 基本信息区域 -->
                 <div class="card-info-section">
@@ -1067,7 +1248,7 @@
         </el-dialog>
 
         <!-- 流转卡数据编辑对话框 -->
-        <el-dialog title="填写流转卡数据" :visible.sync="cardDataEditDialogVisible" width="90%" top="5vh">
+        <el-dialog title="填写流转卡数据" :visible.sync="cardDataEditDialogVisible" width="90%" top="5vh" @close="closeCardDataEditDialogWithCleanup">
             <div v-if="currentEditingCard">
                 <!-- 编辑表单 -->
                 <el-form :model="cardDataEditForm" label-width="120px">
@@ -1123,7 +1304,10 @@
                                     v-if="field.field_type === 'text'" 
                                     v-model="scope.row[field.name]" 
                                     size="mini"
-                                    :readonly="!canEditField(field)">
+                                    :readonly="!canEditField(field)"
+                                    @input="onCellChange(scope.$index, field.name, $event, field)"
+                                    @focus="onCellFocus(scope.$index, field.name)"
+                                    @blur="onCellBlur(scope.$index, field.name)">
                                 </el-input>
                                 <el-input-number 
                                     v-else-if="field.field_type === 'number'" 
@@ -1162,7 +1346,10 @@
             
             <div slot="footer" class="dialog-footer">
                 <el-button @click="cardDataEditDialogVisible = false">取消</el-button>
-                <el-button type="primary" @click="saveCardDataEdit">保存</el-button>
+                <el-button type="success" @click="submitCardToNextDepartment" v-if="canSubmitToNextDepartment()">
+                    <i class="el-icon-right"></i> 提交到下一部门
+                </el-button>
+                <el-button type="primary" @click="saveCardDataEditWithCollaborativeEdit">保存数据</el-button>
             </div>
         </el-dialog>
 
@@ -1211,11 +1398,89 @@
                 <el-button type="primary" @click="saveField">确定</el-button>
             </div>
         </el-dialog>
+
+        <!-- 部门流转顺序设置对话框 -->
+        <el-dialog title="部门流转顺序设置" :visible.sync="flowSettingsDialogVisible" width="80%" top="5vh">
+            <div v-if="flowSettingsTemplate.id">
+                <div class="flow-settings-header">
+                    <h3>{{ flowSettingsTemplate.template_name }} - 流转顺序</h3>
+                    <p>设置流转卡在不同部门之间的流转顺序，按顺序依次流转</p>
+                </div>
+
+                <!-- 添加部门 -->
+                <div style="margin-bottom: 20px;">
+                    <el-select v-model="newDepartmentForFlow" placeholder="选择要添加的部门" style="width: 300px; margin-right: 10px;">
+                        <el-option v-for="dept in availableDepartmentsForFlow" 
+                                    :key="dept.id" 
+                                    :label="dept.name" 
+                                    :value="dept.id">
+                        </el-option>
+                    </el-select>
+                    <el-button type="primary" @click="addDepartmentToFlow" icon="el-icon-plus">添加部门</el-button>
+                </div>
+
+                <!-- 流转顺序列表 -->
+                <el-table :data="templateFlowDepartments" border style="width: 100%;">
+                    <el-table-column label="流转顺序" width="100" align="center">
+                        <template slot-scope="scope">
+                            <el-tag type="primary">{{ scope.$index + 1 }}</el-tag>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="部门名称" width="200">
+                        <template slot-scope="scope">
+                            <el-tag v-if="getDepartmentName(scope.row.department_id)" type="success">
+                                {{ getDepartmentName(scope.row.department_id) }}
+                            </el-tag>
+                            <span v-else style="color: #999;">未找到部门</span>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="是否必填" width="100" align="center">
+                        <template slot-scope="scope">
+                            <el-switch v-model="scope.row.is_required"></el-switch>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="超时时间（小时）" width="150" align="center">
+                        <template slot-scope="scope">
+                            <el-input-number v-model="scope.row.timeout_hours" :min="1" :max="720" size="small"></el-input-number>
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="200" align="center">
+                        <template slot-scope="scope">
+                            <el-button size="mini" @click="moveDepartmentUp(scope.row)" :disabled="scope.$index === 0" icon="el-icon-top">上移</el-button>
+                            <el-button size="mini" @click="moveDepartmentDown(scope.row)" :disabled="scope.$index === templateFlowDepartments.length - 1" icon="el-icon-bottom">下移</el-button>
+                            <el-button size="mini" type="danger" @click="removeDepartmentFromFlow(scope.row)" icon="el-icon-delete">删除</el-button>
+                        </template>
+                    </el-table-column>
+                </el-table>
+
+                <!-- 提示信息 -->
+                <div style="margin-top: 20px; color: #666; font-size: 14px;">
+                    <p>💡 提示：</p>
+                    <ul>
+                        <li>流转顺序决定了流转卡在不同部门之间的流转路径</li>
+                        <li>每个流转卡将按照此顺序依次流转到各个部门</li>
+                        <li>上移/下移可以调整部门的流转顺序</li>
+                        <li>删除部门将从流转顺序中移除该部门</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div slot="footer" class="dialog-footer">
+                <el-button @click="cancelFlowSettings">取消</el-button>
+                <el-button type="primary" @click="saveFlowSettings">保存流转顺序</el-button>
+            </div>
+        </el-dialog>
     </div>
 
     <script src="https://unpkg.com/vue@2/dist/vue.js"></script>
     <script src="https://unpkg.com/element-ui/lib/index.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
-    <script src="js/api.js?v=20251201_1124"></script>
-    <script src="js/app.js?v=20251201_1124"></script>
+    <script src="js/api.js?v=20260104_1330"></script>
+    <script src="js/app.js?v=20260104_1330"></script>
+    
+    <!-- 前端版本信息 -->
+    <div style="position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 3px; font-size: 12px; z-index: 9999;">
+        前端版本: v2026.01.04.1018 (流转卡提交到下一部门功能已完成)
+    </div>
 </body>
+</html>

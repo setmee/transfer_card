@@ -1,5 +1,10 @@
-// API接口配置
-const API_BASE_URL = 'http://localhost:5000/api';
+// API接口配置 - 根据当前访问地址动态生成API URL
+const API_BASE_URL = (() => {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    // 使用主机的5000端口作为后端API地址
+    return `${protocol}//${hostname}:5000/api`;
+})();
 
 // 获取认证token
 function getAuthToken() {
@@ -346,6 +351,102 @@ const templateAPI = {
     }
 };
 
+// 部门流转API
+const flowAPI = {
+    // 获取当前用户需要处理的流转卡
+    getPendingFlowCards: () => {
+        return api.get('/flow/pending');
+    },
+    
+    // 获取流转卡流转历史
+    getFlowHistory: (cardId) => {
+        return api.get(`/flow/${cardId}/history`);
+    },
+    
+    // 获取当前部门流转状态
+    getCurrentFlow: (cardId) => {
+        return api.get(`/flow/${cardId}/current`);
+    },
+    
+    // 获取流转卡流转状态（完整版）
+    getCardFlowStatus: (cardId) => {
+        return api.get(`/flow/cards/${cardId}/status`);
+    },
+    
+    // 启动流转卡流转
+    startCardFlow: (cardId) => {
+        return api.post(`/flow/cards/${cardId}/start`);
+    },
+    
+    // 提交到下一部门
+    submitToNext: (cardId, flowData) => {
+        return api.post(`/flow/cards/${cardId}/submit`, flowData);
+    },
+    
+    // 驳回流转卡
+    rejectCard: (cardId, rejectData) => {
+        return api.post(`/flow/cards/${cardId}/reject`, rejectData);
+    },
+    
+    // 管理员重新启动流转卡
+    restartCardFlow: (cardId, restartData) => {
+        return api.post(`/flow/cards/${cardId}/restart`, restartData);
+    },
+    
+    // 流转到下一部门（旧方法，保留兼容）
+    flowToNext: (cardId, flowData) => {
+        return api.post(`/flow/cards/${cardId}/submit`, flowData);
+    },
+    
+    // 流转到指定部门
+    flowToDepartment: (cardId, departmentId, flowData) => {
+        return api.post(`/flow/${cardId}/to-department/${departmentId}`, flowData);
+    },
+    
+    // 获取部门流转配置
+    getFlowConfig: () => {
+        return api.get('/flow/config');
+    },
+    
+    // 获取可流转的部门列表
+    getAvailableDepartments: (cardId) => {
+        return api.get(`/flow/${cardId}/available-departments`);
+    },
+    
+    // 撤回流转
+    withdrawFlow: (cardId, flowId) => {
+        return api.post(`/flow/${cardId}/withdraw/${flowId}`);
+    },
+    
+    // 获取流转历史（全局）
+    getFlowHistory: (params = {}) => {
+        return api.get('/flow/history', { params });
+    }
+};
+
+// 工作台API
+const dashboardAPI = {
+    // 获取工作台统计数据
+    getStats: () => {
+        return api.get('/dashboard/stats');
+    },
+    
+    // 获取最近操作记录
+    getOperations: (params = {}) => {
+        return api.get('/dashboard/operations', { params });
+    },
+    
+    // 刷新最近操作记录
+    refreshOperations: () => {
+        return api.get('/dashboard/operations', { params: { page: 1 } });
+    },
+    
+    // 加载更多操作记录
+    loadMoreOperations: (page) => {
+        return api.get('/dashboard/operations', { params: { page } });
+    }
+};
+
 // 工具函数
 const utils = {
     // 格式化日期时间
@@ -414,6 +515,8 @@ window.TransferCardAPI = {
     field: fieldAPI,
     card: cardAPI,
     template: templateAPI,
+    flow: flowAPI,
+    dashboard: dashboardAPI,
     utils: utils,
     setAuthToken,
     clearAuthToken,
