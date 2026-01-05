@@ -115,16 +115,43 @@ def main():
         connection = pymysql.connect(**server_config)
         
         with connection.cursor() as cursor:
-            # 分割SQL语句
+            # 分割SQL语句，处理多行语句
             statements = []
             current_statement = []
+            in_create_statement = False
             
             for line in sql_content.split('\n'):
-                line = line.strip()
+                line = line.rstrip()  # 保留前导空格
                 
-                # 跳过注释和空行
-                if not line or line.startswith('--'):
+                # 跳过注释
+                if line.strip().startswith('--'):
                     continue
+                
+                # 跳过MySQL特定语句
+                if any(keyword in line.upper() for keyword in [
+                    'SET FOREIGN_KEY_CHECKS',
+                    'SET @OLD',
+                    '/*!40',
+                    '/*!50',
+                    'SET character_set_client',
+                    'DROP VIEW IF EXISTS'
+                ]):
+                    # 对于SET FOREIGN_KEY_CHECKS，我们需要执行
+                    if 'FOREIGN_KEY_CHECKS' in line.upper():
+                        current_statement.append(line)
+                        if line.endswith(';'):
+                            full_statement = '\n'.join(current_statement)
+                            statements.append(full_statement)
+                            current_statement = []
+                    continue
+                
+                # 跳过空行（不在CREATE语句中时）
+                if not line and not in_create_statement:
+                    continue
+                
+                # 检测CREATE语句
+                if line.strip().upper().startswith('CREATE'):
+                    in_create_statement = True
                 
                 current_statement.append(line)
                 
@@ -133,23 +160,33 @@ def main():
                     full_statement = '\n'.join(current_statement)
                     statements.append(full_statement)
                     current_statement = []
+                    in_create_statement = False
             
             # 执行每个语句
+            success_count = 0
+            skip_count = 0
             for i, statement in enumerate(statements, 1):
                 try:
                     # 跳过CREATE DATABASE和USE语句（我们已经创建了）
-                    if 'CREATE DATABASE' in statement or 'USE' in statement:
+                    stmt_upper = statement.upper()
+                    if 'CREATE DATABASE' in stmt_upper or 'USE `' in stmt_upper:
+                        print(f"  执行语句 {i}/{len(statements)}: 跳过（不需要）")
                         continue
                     
                     cursor.execute(statement)
-                    print(f"  执行语句 {i}/{len(statements)}: 成功")
+                    success_count += 1
+                    if success_count % 5 == 0 or i == len(statements):
+                        print(f"  进度: {i}/{len(statements)} 语句已执行")
                 except Exception as e:
                     if 'Duplicate' in str(e) or 'already exists' in str(e):
-                        print(f"  执行语句 {i}/{len(statements)}: 跳过（已存在）")
+                        skip_count += 1
+                        if skip_count == 1:
+                            print(f"  部分对象已存在，继续执行...")
                     else:
-                        print(f"  执行语句 {i}/{len(statements)}: 错误 - {e}")
+                        print(f"  警告: 语句 {i} - {str(e)[:100]}")
             
             connection.commit()
+            print(f"  成功执行 {success_count} 个语句，跳过 {skip_count} 个已存在对象")
         
         # 检查创建的表
         with connection.cursor() as cursor:
