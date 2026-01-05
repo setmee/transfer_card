@@ -1,8 +1,11 @@
 -- 流转卡系统数据库结构
 -- 数据库: transfer_card_system
--- 导出时间: 2026-01-05 14:41:40
+-- 导出时间: 2026-01-05 14:50:53
 -- 字符集: utf8mb4
 -- 排序规则: utf8mb4_unicode_ci
+
+CREATE DATABASE IF NOT EXISTS `transfer_card_system` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `transfer_card_system`;
 
 -- card_data
 CREATE TABLE `card_data` (
@@ -159,7 +162,7 @@ CREATE TABLE `departments` (
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `name` (`name`)
-) ENGINE=InnoDB AUTO_INCREMENT=20 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='部门表';
+) ENGINE=InnoDB AUTO_INCREMENT=25 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='部门表';
 
 -- fields
 CREATE TABLE `fields` (
@@ -207,7 +210,7 @@ CREATE TABLE `flow_operation_logs` (
   CONSTRAINT `flow_operation_logs_ibfk_2` FOREIGN KEY (`from_department_id`) REFERENCES `departments` (`id`) ON DELETE SET NULL,
   CONSTRAINT `flow_operation_logs_ibfk_3` FOREIGN KEY (`to_department_id`) REFERENCES `departments` (`id`) ON DELETE SET NULL,
   CONSTRAINT `flow_operation_logs_ibfk_4` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=51 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='娴佽浆鎿嶄綔鏃ュ織琛';
+) ENGINE=InnoDB AUTO_INCREMENT=52 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='娴佽浆鎿嶄綔鏃ュ織琛';
 
 -- operation_logs
 CREATE TABLE `operation_logs` (
