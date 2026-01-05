@@ -41,15 +41,18 @@ cd ../frontend
 npm start &
 FRONTEND_PID=$!
 echo "前端服务已启动 (PID: $FRONTEND_PID)"
-echo "前端地址: http://localhost:8080"
+echo "前端地址: http://localhost:8080 或 http://服务器IP:8080"
 
 echo ""
 echo "=========================================="
 echo "系统启动完成！"
 echo "=========================================="
-echo "前端: http://localhost:8080"
+echo "前端: http://localhost:8080 (本地) 或 http://服务器IP:8080 (外部)"
 echo "后端: http://localhost:5000"
 echo "后端健康检查: http://localhost:5000/health"
+echo ""
+echo "本地访问: 请在浏览器中访问 http://localhost:8080"
+echo "外部访问: 请在浏览器中访问 http://服务器IP:8080"
 echo ""
 echo "按 Ctrl+C 停止所有服务"
 echo "=========================================="
