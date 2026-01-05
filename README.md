@@ -66,7 +66,17 @@ cp config/config.json.example config/config.json
 # 编辑 config/config.json，填入数据库连接信息
 ```
 
-4. **初始化数据库**
+4. **一键初始化数据库**
+```bash
+# Windows
+.\init_db.bat
+
+# Linux/Mac
+chmod +x init_db.sh
+./init_db.sh
+```
+
+或手动初始化：
 ```bash
 mysql -u root -p transfer_card_system < database/schema.sql
 ```
