@@ -66,17 +66,7 @@ cp config/config.json.example config/config.json
 # 编辑 config/config.json，填入数据库连接信息
 ```
 
-4. **一键初始化数据库**
-```bash
-# Windows
-.\init_db.bat
-
-# Linux/Mac
-chmod +x init_db.sh
-./init_db.sh
-```
-
-或手动初始化：
+4. **初始化数据库**
 ```bash
 mysql -u root -p transfer_card_system < database/schema.sql
 ```
@@ -140,10 +130,67 @@ npm start &
 - 前端服务已配置为监听所有网络接口（0.0.0.0），可通过服务器IP访问
 - 确保服务器防火墙已开放8080和5000端口
 
-## 默认账户
+## 数据库管理
 
+### 一键恢复数据库
+
+如果数据库被意外删除或需要重新创建，可以使用以下脚本：
+
+**Windows:**
+```bash
+.\restore_database.bat
+```
+
+**Linux/Mac:**
+```bash
+chmod +x restore_database.sh
+./restore_database.sh
+```
+
+该脚本会：
+- 自动读取 `backend/config/config.json` 中的数据库配置
+- 删除并重新创建数据库
+- 创建所有表（14个数据表 + 1个视图）
+
+### 创建管理员用户
+
+使用以下脚本创建或重置管理员账户：
+
+```bash
+python create_admin_user.py
+```
+
+该脚本会：
+- 连接到数据库
+- 检查用户是否已存在
+- 如果存在，询问是否更新密码
+- 如果不存在，创建新的管理员用户
+
+**默认管理员账户：**
 - 用户名: `admin`
-- 密码: `admin123`
+- 密码: `123456`
+- 真实姓名: 系统管理员
+- 邮箱: admin@example.com
+- 角色: admin
+
+**注意：** 为了安全，首次登录后请立即修改密码！
+
+### 数据库手动操作
+
+**导入数据库结构：**
+```bash
+mysql -u root -p transfer_card_system < database/schema.sql
+```
+
+**查看所有表：**
+```bash
+mysql -u root -p transfer_card_system -e "SHOW TABLES;"
+```
+
+**查看用户列表：**
+```bash
+mysql -u root -p transfer_card_system -e "SELECT id, username, real_name, role FROM users;"
+```
 
 ## 功能特性
 
