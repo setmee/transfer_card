@@ -88,8 +88,8 @@ def main():
             print_info(f"正在创建数据库 '{db_name}'...")
             cursor.execute(f"""
                 CREATE DATABASE IF NOT EXISTS `{db_name}`
-                CHARACTER SET utf8mb4 
-                COLLATE utf8mb4_unicode_ci
+                CHARACTER SET utf16le 
+                COLLATE utf16le_general_ci
             """)
             print_success(f"数据库 '{db_name}' 创建成功")
             

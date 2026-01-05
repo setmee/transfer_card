@@ -10,7 +10,7 @@
         "database": "transfer_card_system",
         "user": "root",
         "password": "LGY@lgy1109",
-        "charset": "utf8mb4"
+        "charset": "utf16le"
     },
     "jwt": {
         "secret": "your_jwt_secret_key_here",
