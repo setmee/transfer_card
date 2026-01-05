@@ -93,7 +93,7 @@ python app.py
 
 # 启动前端（新终端）
 cd frontend
-npm run dev
+npm start
 ```
 
 **Linux/Mac:**
@@ -104,7 +104,7 @@ python app.py &
 
 # 启动前端
 cd frontend
-npm run dev &
+npm start &
 ```
 
 或使用启动脚本：
@@ -117,7 +117,7 @@ npm run dev &
 ```
 
 8. **访问应用**
-- 前端: http://localhost:3000
+- 前端: http://localhost:8080
 - 后端API: http://localhost:5000
 
 ## 默认账户
