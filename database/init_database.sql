@@ -97,7 +97,7 @@ CREATE TABLE `templates` (
 -- 5. template_snapshots 模板快照表
 CREATE TABLE `template_snapshots` (
   `id` int NOT NULL AUTO_INCREMENT,
-  `template_id` int NOT NULL COMMENT '模板ID',
+  `template_id` int DEFAULT NULL COMMENT '模板ID',
   `snapshot_id` varchar(50) NOT NULL COMMENT '快照ID（自动生成唯一值）',
   `template_name` varchar(100) NOT NULL COMMENT '模板名称（快照时保存）',
   `department_id` int NOT NULL COMMENT '部门ID',
