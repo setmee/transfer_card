@@ -2093,7 +2093,6 @@ def get_template_cards():
                     FROM template_department_flow
                     GROUP BY template_id
                 ) tdf ON tc.template_id = tdf.template_id
-                ) tdf ON tc.template_id = tdf.template_id
                 WHERE (tc.template_id IS NOT NULL OR tc.snapshot_id IS NOT NULL)
                 AND (
                     tc.current_department_id = %s 
