@@ -6,6 +6,9 @@
 - 创建字段定义
 - 创建模板
 - 关联字段到模板
+- 设置部门字段权限
+- 设置模板字段权限
+- 设置模板部门流转顺序
 """
 
 import pymysql
@@ -106,17 +109,17 @@ def init_fields(cursor):
     for dept in cursor.fetchall():
         dept_ids[dept['name']] = dept['id']
     
-    # 插入字段
+    # 插入字段 - 所有字段都设置为：不必填、可见
     for name, display_name, field_type, dept_name, category, position in fields:
         try:
             dept_id = dept_ids.get(dept_name)
             cursor.execute(
                 """INSERT INTO fields 
-                (name, display_name, field_type, department_id, department_name, category, field_position, is_required)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                (name, display_name, field_type, dept_id, dept_name, category, position, False)
+                (name, display_name, field_type, department_id, department_name, category, field_position, is_required, is_hidden)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (name, display_name, field_type, dept_id, dept_name, category, position, False, False)
             )
-            print(f"  ✅ 创建字段: {display_name}")
+            print(f"  ✅ 创建字段: {display_name} (不必填, 可见)")
         except Exception as e:
             print(f"  ⚠️  字段 {display_name} 已存在或创建失败: {e}")
 
@@ -129,7 +132,7 @@ def init_template(cursor):
         cursor.execute("SELECT id FROM users WHERE role='admin' LIMIT 1")
         admin = cursor.fetchone()
         if not admin:
-            print("  ❌ 未找到管理员用户")
+            print("  ❌ 未找到管理员用户，请先运行 create_admin_user.py")
             return None
         
         # 获取第一个部门
@@ -159,20 +162,69 @@ def init_template_fields(cursor, template_id):
     
     for idx, field in enumerate(fields, 1):
         try:
+            # 所有字段都设置为不必填
             cursor.execute(
                 """INSERT INTO template_fields
                 (template_id, field_id, field_name, field_display_name, field_type, field_order, is_required)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (template_id, field['id'], field['name'], field['display_name'], 
-                 field['field_type'], idx, idx <= 10)  # 前10个字段必填
+                 field['field_type'], idx, False)
             )
-            print(f"  ✅ 关联字段 {idx}: {field['display_name']}")
+            print(f"  ✅ 关联字段 {idx}: {field['display_name']} (不必填)")
         except Exception as e:
             print(f"  ⚠️  关联字段 {field['display_name']} 失败: {e}")
 
+def init_department_field_permissions(cursor):
+    """初始化部门字段权限"""
+    print("\n初始化部门字段权限...")
+    
+    # 获取所有部门和字段
+    cursor.execute("SELECT id, name FROM departments")
+    departments = cursor.fetchall()
+    
+    cursor.execute("SELECT id, name FROM fields")
+    fields = cursor.fetchall()
+    
+    for dept in departments:
+        for field in fields:
+            try:
+                # 默认：所有部门对所有字段都有读写权限
+                cursor.execute(
+                    """INSERT INTO department_field_permissions
+                    (department_id, field_id, can_read, can_write)
+                    VALUES (%s, %s, %s, %s)""",
+                    (dept['id'], field['id'], True, True)
+                )
+            except Exception as e:
+                pass  # 忽略已存在的记录
+
+def init_template_field_permissions(cursor, template_id):
+    """初始化模板字段权限"""
+    print(f"\n初始化模板字段权限（模板ID: {template_id})...")
+    
+    # 获取所有部门和字段
+    cursor.execute("SELECT id, name FROM departments")
+    departments = cursor.fetchall()
+    
+    cursor.execute("SELECT name, field_type FROM fields")
+    fields = cursor.fetchall()
+    
+    for dept in departments:
+        for field in fields:
+            try:
+                # 默认：所有部门对所有字段都有读写权限
+                cursor.execute(
+                    """INSERT INTO template_field_permissions
+                    (template_id, field_name, department_id, can_read, can_write)
+                    VALUES (%s, %s, %s, %s, %s)""",
+                    (template_id, field['name'], dept['id'], True, True)
+                )
+            except Exception as e:
+                pass  # 忽略已存在的记录
+
 def init_department_flow(cursor, template_id):
     """初始化模板部门流转顺序"""
-    print(f"\n初始化模板部门流转顺序...")
+    print("\n初始化模板部门流转顺序...")
     
     # 获取所有部门
     cursor.execute("SELECT id, name FROM departments ORDER BY id")
@@ -221,14 +273,20 @@ def init_sample_data():
             # 2. 初始化字段定义
             init_fields(cursor)
             
-            # 3. 初始化模板
+            # 3. 初始化部门字段权限
+            init_department_field_permissions(cursor)
+            
+            # 4. 初始化模板
             template_id = init_template(cursor)
             
             if template_id:
-                # 4. 初始化模板字段关联
+                # 5. 初始化模板字段关联
                 init_template_fields(cursor, template_id)
                 
-                # 5. 初始化模板部门流转顺序
+                # 6. 初始化模板字段权限
+                init_template_field_permissions(cursor, template_id)
+                
+                # 7. 初始化模板部门流转顺序
                 init_department_flow(cursor, template_id)
         
         # 提交更改
@@ -247,6 +305,15 @@ def init_sample_data():
             
             cursor.execute("SELECT COUNT(*) as count FROM template_fields")
             template_field_count = cursor.fetchone()['count']
+            
+            cursor.execute("SELECT COUNT(*) as count FROM template_department_flow")
+            template_flow_count = cursor.fetchone()['count']
+            
+            cursor.execute("SELECT COUNT(*) as count FROM department_field_permissions")
+            dept_perm_count = cursor.fetchone()['count']
+            
+            cursor.execute("SELECT COUNT(*) as count FROM template_field_permissions")
+            template_perm_count = cursor.fetchone()['count']
         
         print("\n" + "="*50)
         print("初始化完成！")
@@ -255,13 +322,22 @@ def init_sample_data():
         print(f"字段数: {field_count}")
         print(f"模板数: {template_count}")
         print(f"模板字段关联数: {template_field_count}")
+        print(f"模板流转顺序数: {template_flow_count}")
+        print(f"部门字段权限数: {dept_perm_count}")
+        print(f"模板字段权限数: {template_perm_count}")
         print("="*50)
         print("\n现在可以登录系统并创建流转卡了！")
+        print("提示：如果管理员用户不存在，请先运行 create_admin_user.py")
+        print("提示：所有字段已设置为不必填且可见，可根据需要手动调整")
         
     except pymysql.Error as e:
         print(f"❌ 数据库错误: {e}")
+        if 'connection' in locals():
+            connection.rollback()
     except Exception as e:
         print(f"❌ 错误: {e}")
+        if 'connection' in locals():
+            connection.rollback()
     finally:
         if 'connection' in locals() and connection:
             connection.close()
