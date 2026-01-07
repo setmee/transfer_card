@@ -402,13 +402,20 @@ new Vue({
             isSelectAllTemplateFieldsIndeterminate: false,
             previewTableData: [],
 
-            // 部门流转顺序设置数据
+            // 部门流转顺序设置数据（模板）
             flowSettingsDialogVisible: false,
             flowSettingsTemplate: {},
             templateFlowDepartments: [],
             availableDepartmentsForFlow: [],
             addingDepartmentToFlow: false,
             newDepartmentForFlow: null,
+            
+            // 转流卡流转顺序设置数据（流转卡）
+            cardFlowSettingsDialogVisible: false,
+            currentCardForFlowSettings: {},
+            cardFlowDepartments: [],
+            availableDepartmentsForCardFlow: [],
+            newDepartmentForCardFlow: null,
             
             // 流转卡详情和表格显示相关数据
             templateCards: [],
@@ -3910,9 +3917,178 @@ new Vue({
             }
         },
 
-        // ========== 部门流转顺序设置方法 ==========
+        // ========== 转流卡流转顺序设置方法（单独修改流转卡） ==========
 
-        // 打开流转设置对话框
+        // 打开流转卡流转设置对话框
+        async openCardFlowSettings(card) {
+            try {
+                this.currentCardForFlowSettings = { ...card };
+                
+                // 加载可用部门
+                await this.loadAvailableDepartmentsForCardFlow();
+                
+                // 加载流转卡的流转顺序
+                await this.loadCardFlowDepartments(card.id);
+                
+                this.cardFlowSettingsDialogVisible = true;
+            } catch (error) {
+                console.error('打开流转卡流转设置失败:', error);
+                this.$message.error('打开流转设置失败');
+            }
+        },
+
+        // 加载可用部门（用于流转卡）
+        async loadAvailableDepartmentsForCardFlow() {
+            try {
+                const response = await TransferCardAPI.user.getDepartments();
+                if (response.success) {
+                    // 过滤掉已在流转顺序中的部门
+                    const existingDeptIds = this.cardFlowDepartments.map(dept => dept.department_id);
+                    this.availableDepartmentsForCardFlow = (response.data || []).filter(
+                        dept => !existingDeptIds.includes(dept.id)
+                    );
+                } else {
+                    this.$message.error(response.message || '加载部门列表失败');
+                }
+            } catch (error) {
+                console.error('加载部门列表失败:', error);
+                this.$message.error('加载部门列表失败');
+            }
+        },
+
+        // 加载流转卡的流转顺序
+        async loadCardFlowDepartments(cardId) {
+            try {
+                const response = await axios.get(
+                    `http://localhost:5000/api/cards/${cardId}/flow`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${TransferCardAPI.getAuthToken()}`
+                        }
+                    }
+                );
+                
+                if (response.data.success) {
+                    this.cardFlowDepartments = response.data.data.flow_departments || [];
+                } else {
+                    this.$message.error(response.data.message || '加载流转顺序失败');
+                }
+            } catch (error) {
+                console.error('加载流转卡流转顺序失败:', error);
+                this.$message.error('加载流转顺序失败，请检查网络连接');
+            }
+        },
+
+        // 添加部门到流转卡流转顺序
+        addDepartmentToCardFlow() {
+            if (!this.newDepartmentForCardFlow) {
+                this.$message.warning('请选择要添加的部门');
+                return;
+            }
+
+            // 检查部门是否已经在流转顺序中
+            const exists = this.cardFlowDepartments.some(
+                dept => dept.department_id === this.newDepartmentForCardFlow
+            );
+
+            if (exists) {
+                this.$message.warning('该部门已在流转顺序中');
+                return;
+            }
+
+            // 添加到流转顺序末尾
+            const nextOrder = this.cardFlowDepartments.length + 1;
+            const newDept = {
+                department_id: this.newDepartmentForCardFlow,
+                flow_order: nextOrder,
+                is_required: true,
+                auto_skip: false,
+                timeout_hours: 24
+            };
+
+            this.cardFlowDepartments.push(newDept);
+            this.newDepartmentForCardFlow = null;
+        },
+
+        // 删除流转卡流转部门
+        removeDepartmentFromCardFlow(dept) {
+            const index = this.cardFlowDepartments.indexOf(dept);
+            if (index > -1) {
+                this.cardFlowDepartments.splice(index, 1);
+                // 重新排序
+                this.reorderCardFlowDepartments();
+            }
+        },
+
+        // 上移流转卡流转部门
+        moveCardDepartmentUp(dept) {
+            const index = this.cardFlowDepartments.indexOf(dept);
+            if (index > 0) {
+                this.cardFlowDepartments.splice(index, 1);
+                this.cardFlowDepartments.splice(index - 1, 0, dept);
+                this.reorderCardFlowDepartments();
+            }
+        },
+
+        // 下移流转卡流转部门
+        moveCardDepartmentDown(dept) {
+            const index = this.cardFlowDepartments.indexOf(dept);
+            if (index < this.cardFlowDepartments.length - 1) {
+                this.cardFlowDepartments.splice(index, 1);
+                this.cardFlowDepartments.splice(index + 1, 0, dept);
+                this.reorderCardFlowDepartments();
+            }
+        },
+
+        // 重新排序流转卡流转部门
+        reorderCardFlowDepartments() {
+            this.cardFlowDepartments.forEach((dept, index) => {
+                dept.flow_order = index + 1;
+            });
+        },
+
+        // 保存流转卡流转顺序设置
+        async saveCardFlowSettings() {
+            try {
+                if (this.cardFlowDepartments.length === 0) {
+                    this.$message.warning('请至少添加一个流转部门');
+                    return;
+                }
+
+                const response = await axios.post(
+                    `http://localhost:5000/api/cards/${this.currentCardForFlowSettings.id}/flow`,
+                    { departments: this.cardFlowDepartments },
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${TransferCardAPI.getAuthToken()}`,
+                            'Content-Type': 'application/json'
+                        }
+                    }
+                );
+
+                if (response.data.success) {
+                    this.$message.success('流转顺序设置成功');
+                    this.cardFlowSettingsDialogVisible = false;
+                    this.loadTemplateCards(); // 刷新流转卡列表
+                } else {
+                    this.$message.error(response.data.message || '保存失败');
+                }
+            } catch (error) {
+                console.error('保存流转卡流转顺序失败:', error);
+                this.$message.error('保存流转顺序失败，请检查网络连接');
+            }
+        },
+
+        // 取消流转卡流转设置
+        cancelCardFlowSettings() {
+            this.cardFlowSettingsDialogVisible = false;
+            this.cardFlowDepartments = [];
+            this.currentCardForFlowSettings = {};
+        },
+
+        // ========== 模板流转顺序设置方法 ==========
+
+        // 打开流转设置对话框（模板）
         async openFlowSettings(template) {
             try {
                 this.flowSettingsTemplate = { ...template };

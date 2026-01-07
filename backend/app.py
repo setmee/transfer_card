@@ -1062,26 +1062,32 @@ def get_cards():
         
         with connection.cursor() as cursor:
             if current_user['role'] == 'admin':
-                # 管理员可以看到所有流转卡
+                # 管理员可以看到所有流转卡（使用快照信息，不依赖templates表）
                 sql = """
-                SELECT tc.*, t.template_name, u.username as creator_name,
+                SELECT tc.*, 
+                       COALESCE(ts.template_name, t.template_name, '未知模板') as template_name,
+                       u.username as creator_name,
                        (SELECT COUNT(*) FROM card_data cdr WHERE cdr.card_id = tc.id) as row_count
                 FROM transfer_cards tc
+                LEFT JOIN template_snapshots ts ON tc.snapshot_id = ts.snapshot_id
                 LEFT JOIN templates t ON tc.template_id = t.id
                 LEFT JOIN users u ON tc.created_by = u.id
                 ORDER BY tc.created_at DESC
                 """
                 cursor.execute(sql)
             else:
-                # 普通用户只能看到有权限访问的流转卡，且不能看到草稿和取消状态
+                # 普通用户只能看到有权限访问的流转卡，且不能看到草稿和取消状态（使用快照信息）
                 sql = """
-                SELECT DISTINCT tc.*, t.template_name, u.username as creator_name,
+                SELECT DISTINCT tc.*, 
+                       COALESCE(ts.template_name, t.template_name, '未知模板') as template_name,
+                       u.username as creator_name,
                        (SELECT COUNT(*) FROM card_data cdr WHERE cdr.card_id = tc.id) as row_count
                 FROM transfer_cards tc
+                LEFT JOIN template_snapshots ts ON tc.snapshot_id = ts.snapshot_id
                 LEFT JOIN templates t ON tc.template_id = t.id
                 LEFT JOIN users u ON tc.created_by = u.id
-                LEFT JOIN template_field_permissions tfp ON t.id = tfp.template_id
-                WHERE (tfp.department_id = %s OR tc.created_by = %s)
+                LEFT JOIN template_field_permissions tfp ON COALESCE(ts.template_id, t.id) = tfp.template_id
+                WHERE (tfp.department_id = %s OR tc.created_by = %s OR tfp.template_id IS NULL)
                 AND tc.status NOT IN ('draft', 'cancelled')
                 ORDER BY tc.created_at DESC
                 """
@@ -1198,42 +1204,79 @@ def get_card_data(card_id):
             if not card_info:
                 return jsonify({'success': False, 'message': '流转卡不存在'}), 404
             
-            # 获取模板配置的字段
+            # 获取流转卡快照的字段配置（优先使用快照，如果快照为空则回退到模板）
             if current_user['role'] == 'admin':
-                # 管理员可以看到模板配置的所有字段
+                # 管理员可以看到快照的所有字段
                 field_sql = """
-                SELECT tf.*, f.department_name, f.department_id as field_dept_id,
-                       GROUP_CONCAT(DISTINCT tfp.can_read) as can_read,
-                       GROUP_CONCAT(DISTINCT tfp.can_write) as can_write,
-                       GROUP_CONCAT(DISTINCT tfp.department_id) as perm_dept_id
-                FROM template_fields tf
-                LEFT JOIN fields f ON tf.field_id = f.id
-                LEFT JOIN template_field_permissions tfp ON tf.field_name = tfp.field_name 
-                                                          AND tfp.template_id = %s
-                WHERE tf.template_id = %s
-                GROUP BY tf.id
-                ORDER BY tf.field_order
+                SELECT ctf.*,
+                       GROUP_CONCAT(DISTINCT cfp.can_read) as can_read,
+                       GROUP_CONCAT(DISTINCT cfp.can_write) as can_write,
+                       GROUP_CONCAT(DISTINCT cfp.department_id) as perm_dept_id
+                FROM card_template_fields ctf
+                LEFT JOIN card_field_permissions cfp ON ctf.field_name = cfp.field_name 
+                                                      AND cfp.card_id = %s
+                WHERE ctf.card_id = %s
+                GROUP BY ctf.id
+                ORDER BY ctf.field_order
                 """
-                cursor.execute(field_sql, (card_info['template_id'], card_info['template_id']))
+                cursor.execute(field_sql, (card_id, card_id))
+                
+                fields = cursor.fetchall()
+                
+                # 如果快照为空，回退到模板（兼容旧数据）
+                if not fields and card_info.get('template_id'):
+                    fallback_field_sql = """
+                    SELECT tf.*, f.department_name, f.department_id as field_dept_id,
+                           GROUP_CONCAT(DISTINCT tfp.can_read) as can_read,
+                           GROUP_CONCAT(DISTINCT tfp.can_write) as can_write,
+                           GROUP_CONCAT(DISTINCT tfp.department_id) as perm_dept_id
+                    FROM template_fields tf
+                    LEFT JOIN fields f ON tf.field_id = f.id
+                    LEFT JOIN template_field_permissions tfp ON tf.field_name = tfp.field_name 
+                                                              AND tfp.template_id = %s
+                    WHERE tf.template_id = %s
+                    GROUP BY tf.id
+                    ORDER BY tf.field_order
+                    """
+                    cursor.execute(fallback_field_sql, (card_info['template_id'], card_info['template_id']))
+                    fields = cursor.fetchall()
             else:
-                # 普通用户只能看到模板配置且有权限的字段
+                # 普通用户只能看到快照配置且有权限的字段
                 field_sql = """
-                SELECT tf.*, f.department_name, f.department_id as field_dept_id,
-                       GROUP_CONCAT(DISTINCT tfp.can_read) as can_read,
-                       GROUP_CONCAT(DISTINCT tfp.can_write) as can_write,
-                       GROUP_CONCAT(DISTINCT tfp.department_id) as perm_dept_id
-                FROM template_fields tf
-                LEFT JOIN fields f ON tf.field_id = f.id
-                LEFT JOIN template_field_permissions tfp ON tf.field_name = tfp.field_name 
-                                                          AND tfp.template_id = %s
-                                                          AND tfp.department_id = %s
-                WHERE tf.template_id = %s
-                GROUP BY tf.id
-                ORDER BY tf.field_order
+                SELECT ctf.*,
+                       GROUP_CONCAT(DISTINCT cfp.can_read) as can_read,
+                       GROUP_CONCAT(DISTINCT cfp.can_write) as can_write,
+                       GROUP_CONCAT(DISTINCT cfp.department_id) as perm_dept_id
+                FROM card_template_fields ctf
+                LEFT JOIN card_field_permissions cfp ON ctf.field_name = cfp.field_name 
+                                                      AND cfp.card_id = %s
+                                                      AND cfp.department_id = %s
+                WHERE ctf.card_id = %s
+                GROUP BY ctf.id
+                ORDER BY ctf.field_order
                 """
-                cursor.execute(field_sql, (card_info['template_id'], current_user['department_id'], card_info['template_id']))
-            
-            fields = cursor.fetchall()
+                cursor.execute(field_sql, (card_id, current_user['department_id'], card_id))
+                
+                fields = cursor.fetchall()
+                
+                # 如果快照为空，回退到模板（兼容旧数据）
+                if not fields and card_info.get('template_id'):
+                    fallback_field_sql = """
+                    SELECT tf.*, f.department_name, f.department_id as field_dept_id,
+                           GROUP_CONCAT(DISTINCT tfp.can_read) as can_read,
+                           GROUP_CONCAT(DISTINCT tfp.can_write) as can_write,
+                           GROUP_CONCAT(DISTINCT tfp.department_id) as perm_dept_id
+                    FROM template_fields tf
+                    LEFT JOIN fields f ON tf.field_id = f.id
+                    LEFT JOIN template_field_permissions tfp ON tf.field_name = tfp.field_name 
+                                                              AND tfp.template_id = %s
+                                                              AND tfp.department_id = %s
+                    WHERE tf.template_id = %s
+                    GROUP BY tf.id
+                    ORDER BY tf.field_order
+                    """
+                    cursor.execute(fallback_field_sql, (card_info['template_id'], current_user['department_id'], card_info['template_id']))
+                    fields = cursor.fetchall()
             
             # 处理GROUP_CONCAT结果，转换为布尔值，并重命名字段以匹配前端期望
             for field in fields:
@@ -1979,9 +2022,11 @@ def get_template_cards():
         
         with connection.cursor() as cursor:
             if current_user['role'] == 'admin':
-                # 管理员可以看到所有基于模板的流转卡
+                # 管理员可以看到所有基于模板的流转卡（使用快照，不依赖templates表）
                 sql = """
-                SELECT tc.*, t.template_name, u.username as creator_name,
+                SELECT tc.*, 
+                       COALESCE(ts.template_name, t.template_name, '未知模板') as template_name, 
+                       u.username as creator_name,
                        (SELECT COUNT(*) FROM card_data cdr WHERE cdr.card_id = tc.id) as row_count,
                        d.name as current_department_name,
                        cfs.flow_order as current_step,
@@ -1991,6 +2036,7 @@ def get_template_cards():
                            ELSE 0 
                        END as is_last_department
                 FROM transfer_cards tc
+                LEFT JOIN template_snapshots ts ON tc.snapshot_id = ts.snapshot_id
                 LEFT JOIN templates t ON tc.template_id = t.id
                 LEFT JOIN users u ON tc.created_by = u.id
                 LEFT JOIN departments d ON tc.current_department_id = d.id
@@ -2002,7 +2048,6 @@ def get_template_cards():
                     FROM template_department_flow
                     GROUP BY template_id
                 ) tdf ON tc.template_id = tdf.template_id
-                WHERE tc.template_id IS NOT NULL
                 ORDER BY tc.created_at DESC
                 """
                 cursor.execute(sql)
@@ -2011,8 +2056,11 @@ def get_template_cards():
                 # 1. 当前流转到他们部门的流转卡（processing状态）
                 # 2. 已经流转到过他们部门的流转卡（completed状态）
                 # 3. 自己创建的流转卡
+                # 使用快照确保模板被删除后仍能显示流转卡
                 sql = """
-                SELECT DISTINCT tc.*, t.template_name, u.username as creator_name,
+                SELECT DISTINCT tc.*, 
+                       COALESCE(ts.template_name, t.template_name, '未知模板') as template_name, 
+                       u.username as creator_name,
                        (SELECT COUNT(*) FROM card_data cdr WHERE cdr.card_id = tc.id) as row_count,
                        d.name as current_department_name,
                        cfs.flow_order as current_step,
@@ -2033,6 +2081,7 @@ def get_template_cards():
                            ELSE 'none'
                        END as permission_level
                 FROM transfer_cards tc
+                LEFT JOIN template_snapshots ts ON tc.snapshot_id = ts.snapshot_id
                 LEFT JOIN templates t ON tc.template_id = t.id
                 LEFT JOIN users u ON tc.created_by = u.id
                 LEFT JOIN departments d ON tc.current_department_id = d.id
@@ -2044,7 +2093,8 @@ def get_template_cards():
                     FROM template_department_flow
                     GROUP BY template_id
                 ) tdf ON tc.template_id = tdf.template_id
-                WHERE tc.template_id IS NOT NULL
+                ) tdf ON tc.template_id = tdf.template_id
+                WHERE (tc.template_id IS NOT NULL OR tc.snapshot_id IS NOT NULL)
                 AND (
                     tc.current_department_id = %s 
                     OR EXISTS (
@@ -2063,7 +2113,7 @@ def get_template_cards():
             
             template_cards = cursor.fetchall()
             
-            # 为每个流转卡获取完整的流转顺序
+            # 为每个流转卡获取完整的流转顺序（从流转卡快照表读取，而不是模板表）
             for card in template_cards:
                 # 格式化时间
                 if card.get('created_at'):
@@ -2071,8 +2121,19 @@ def get_template_cards():
                 if card.get('updated_at'):
                     card['updated_at'] = card['updated_at'].isoformat()
                 
-                # 获取模板的流转部门顺序
-                if card.get('template_id'):
+                # 优先从流转卡快照表读取流转顺序（card_department_flow）
+                # 如果快照为空，则回退到模板表（兼容旧数据）
+                cursor.execute("""
+                    SELECT cdf.*, d.name as department_name
+                    FROM card_department_flow cdf
+                    LEFT JOIN departments d ON cdf.department_id = d.id
+                    WHERE cdf.card_id = %s
+                    ORDER BY cdf.flow_order
+                """, (card['id'],))
+                flow_departments = cursor.fetchall()
+                
+                # 如果快照为空，回退到模板表（兼容旧数据）
+                if not flow_departments and card.get('template_id'):
                     cursor.execute("""
                         SELECT tdf.*, d.name as department_name
                         FROM template_department_flow tdf
@@ -2081,14 +2142,12 @@ def get_template_cards():
                         ORDER BY tdf.flow_order
                     """, (card['template_id'],))
                     flow_departments = cursor.fetchall()
-                    
-                    # 标记当前流转部门
-                    for dept in flow_departments:
-                        dept['is_current'] = (dept['department_id'] == card.get('current_department_id'))
-                    
-                    card['flow_departments'] = flow_departments
-                else:
-                    card['flow_departments'] = []
+                
+                # 标记当前流转部门
+                for dept in flow_departments:
+                    dept['is_current'] = (dept['department_id'] == card.get('current_department_id'))
+                
+                card['flow_departments'] = flow_departments
             
             return jsonify({
                 'success': True,
@@ -2244,6 +2303,72 @@ def create_template_card_with_table_data():
                         INSERT INTO card_data (card_id, `row_number`, created_at, updated_at)
                         VALUES (%s, %s, NOW(), NOW())
                     """, (card_id, i))
+                
+                # 创建模板快照：快照字段配置
+                if template_fields:
+                    for field in template_fields:
+                        cursor.execute("""
+                            INSERT INTO card_template_fields 
+                            (card_id, field_name, field_display_name, field_type, field_order,
+                             is_required, default_value, options, department_id, department_name)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (
+                            card_id,
+                            field.get('field_name'),
+                            field.get('field_name'),  # display_name
+                            field.get('field_type', 'text'),
+                            field.get('field_order', 1),
+                            1 if field.get('is_required') else 0,
+                            field.get('default_value', ''),
+                            field.get('options', ''),
+                            field.get('department_id'),
+                            field.get('department_name')
+                        ))
+                
+                # 创建模板快照：快照部门流转顺序
+                cursor.execute("""
+                    SELECT tdf.*, d.name as department_name
+                    FROM template_department_flow tdf
+                    LEFT JOIN departments d ON tdf.department_id = d.id
+                    WHERE tdf.template_id = %s
+                    ORDER BY tdf.flow_order
+                """, (template_id,))
+                template_flow = cursor.fetchall()
+                
+                for flow_step in template_flow:
+                    cursor.execute("""
+                        INSERT INTO card_department_flow 
+                        (card_id, department_id, flow_order, is_required, auto_skip, timeout_hours)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        card_id,
+                        flow_step['department_id'],
+                        flow_step['flow_order'],
+                        flow_step['is_required'],
+                        flow_step['auto_skip'],
+                        flow_step['timeout_hours']
+                    ))
+                
+                # 创建模板快照：快照字段权限
+                cursor.execute("""
+                    SELECT tfp.*
+                    FROM template_field_permissions tfp
+                    WHERE tfp.template_id = %s
+                """, (template_id,))
+                template_perms = cursor.fetchall()
+                
+                for perm in template_perms:
+                    cursor.execute("""
+                        INSERT INTO card_field_permissions 
+                        (card_id, field_name, department_id, can_read, can_write)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (
+                        card_id,
+                        perm['field_name'],
+                        perm['department_id'],
+                        perm['can_read'],
+                        perm['can_write']
+                    ))
                 
                 # 根据模板字段设置默认值
                 if template_fields:
@@ -2558,6 +2683,149 @@ def remove_template_field(template_id, field_id):
     
     except Exception as e:
         return jsonify({'success': False, 'message': f'删除模板字段失败: {str(e)}'}), 500
+    finally:
+        if 'connection' in locals():
+            connection.close()
+
+# ========== 转流卡流转顺序管理接口 ==========
+
+# 获取流转卡的流转顺序
+@app.route('/api/cards/<int:card_id>/flow', methods=['GET'])
+@jwt_required()
+def get_card_flow(card_id):
+    """获取流转卡的流转顺序"""
+    try:
+        current_user = get_current_user_info()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
+        
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'message': '数据库连接失败'}), 500
+        
+        with connection.cursor() as cursor:
+            # 检查流转卡是否存在
+            cursor.execute("SELECT id, card_number, template_id FROM transfer_cards WHERE id = %s", (card_id,))
+            card = cursor.fetchone()
+            if not card:
+                return jsonify({'success': False, 'message': '流转卡不存在'}), 404
+            
+            # 获取流转卡的流转顺序（从快照表card_department_flow读取）
+            cursor.execute("""
+                SELECT cdf.*, d.name as department_name
+                FROM card_department_flow cdf
+                LEFT JOIN departments d ON cdf.department_id = d.id
+                WHERE cdf.card_id = %s
+                ORDER BY cdf.flow_order
+            """, (card_id,))
+            flow_departments = cursor.fetchall()
+            
+            # 如果快照为空，回退到模板表（兼容旧数据）
+            if not flow_departments and card.get('template_id'):
+                cursor.execute("""
+                    SELECT tdf.*, d.name as department_name
+                    FROM template_department_flow tdf
+                    LEFT JOIN departments d ON tdf.department_id = d.id
+                    WHERE tdf.template_id = %s
+                    ORDER BY tdf.flow_order
+                """, (card['template_id'],))
+                flow_departments = cursor.fetchall()
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'card_id': card_id,
+                    'card_number': card['card_number'],
+                    'flow_departments': flow_departments
+                }
+            })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'获取流转顺序失败: {str(e)}'}), 500
+    finally:
+        if 'connection' in locals():
+            connection.close()
+
+# 设置流转卡的流转顺序
+@app.route('/api/cards/<int:card_id>/flow', methods=['POST'])
+@jwt_required()
+def set_card_flow(card_id):
+    """设置流转卡的流转顺序（只影响当前流转卡，不影响模板和其他流转卡）"""
+    try:
+        current_user = get_current_user_info()
+        if not current_user:
+            return jsonify({'success': False, 'message': '用户信息获取失败'}), 401
+        
+        # 只有管理员可以修改流转顺序
+        if current_user['role'] != 'admin':
+            return jsonify({'success': False, 'message': '只有管理员可以修改流转顺序'}), 403
+        
+        data = request.get_json()
+        departments = data.get('departments', [])
+        
+        if not departments:
+            return jsonify({'success': False, 'message': '部门列表不能为空'}), 400
+        
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'message': '数据库连接失败'}), 500
+        
+        with connection.cursor() as cursor:
+            # 开始事务
+            connection.begin()
+            
+            try:
+                # 检查流转卡是否存在
+                cursor.execute("SELECT id, card_number, current_department_id, status FROM transfer_cards WHERE id = %s", (card_id,))
+                card = cursor.fetchone()
+                if not card:
+                    return jsonify({'success': False, 'message': '流转卡不存在'}), 404
+                
+                # 检查流转卡是否已完成或已驳回
+                if card['status'] in ['completed', 'rejected']:
+                    return jsonify({'success': False, 'message': '已完成或已驳回的流转卡不能修改流转顺序'}), 400
+                
+                # 删除流转卡现有的流转顺序（card_department_flow表）
+                cursor.execute("DELETE FROM card_department_flow WHERE card_id = %s", (card_id,))
+                
+                # 插入新的流转顺序到card_department_flow表
+                for dept in departments:
+                    dept_id = dept.get('department_id')
+                    flow_order = dept.get('flow_order')
+                    is_required = dept.get('is_required', True)
+                    auto_skip = dept.get('auto_skip', False)
+                    timeout_hours = dept.get('timeout_hours', 24)
+                    
+                    if not dept_id or not flow_order:
+                        continue
+                    
+                    cursor.execute("""
+                        INSERT INTO card_department_flow 
+                        (card_id, department_id, flow_order, is_required, auto_skip, timeout_hours, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    """, (card_id, dept_id, flow_order, 1 if is_required else 0, 
+                           1 if auto_skip else 0, timeout_hours))
+                
+                # 更新流转卡总流转步骤数
+                cursor.execute("""
+                    UPDATE transfer_cards 
+                    SET total_flow_steps = %s, updated_at = NOW()
+                    WHERE id = %s
+                """, (len(departments), card_id))
+                
+                connection.commit()
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'流转卡 {card["card_number"]} 的流转顺序设置成功'
+                })
+            
+            except Exception as e:
+                connection.rollback()
+                raise e
+    
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'设置流转顺序失败: {str(e)}'}), 500
     finally:
         if 'connection' in locals():
             connection.close()

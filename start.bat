@@ -17,8 +17,8 @@ echo.
 echo 启动后端服务...
 cd backend
 start "Backend Server" python app.py
-echo 后端服务已启动
-echo 后端地址: http://localhost:5000
+echo Backend started successfully
+echo Backend URL: http://localhost:5000
 
 REM 等待后端启动
 timeout /t 3 /nobreak >nul

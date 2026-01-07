@@ -339,7 +339,7 @@
                                     {{ formatDateTime(scope.row.created_at) }}
                                 </template>
                             </el-table-column>
-                            <el-table-column label="操作" width="300" fixed="right">
+                            <el-table-column label="操作" width="380" fixed="right">
                                 <template slot-scope="scope">
                                     <div class="operation-column">
                                         <el-button size="mini" @click="viewCardDetail(scope.row)">查看</el-button>
@@ -353,6 +353,9 @@
                                         </el-button>
                                         <el-button size="mini" type="info" @click="startCardFlow(scope.row)" v-if="canStartCardFlow(scope.row)">
                                             <i class="el-icon-video-play"></i> 启动
+                                        </el-button>
+                                        <el-button size="mini" type="warning" @click="openCardFlowSettings(scope.row)" v-if="isAdmin && scope.row.status !== 'completed' && scope.row.status !== 'rejected'">
+                                            <i class="el-icon-setting"></i> 流转顺序
                                         </el-button>
                                         <el-button size="mini" type="danger" @click="deleteTemplateCard(scope.row)" v-if="canDeleteCard(scope.row)">删除</el-button>
                                     </div>
@@ -1399,77 +1402,150 @@
             </div>
         </el-dialog>
 
-        <!-- 部门流转顺序设置对话框 -->
-        <el-dialog title="部门流转顺序设置" :visible.sync="flowSettingsDialogVisible" width="80%" top="5vh">
-            <div v-if="flowSettingsTemplate.id">
-                <div class="flow-settings-header">
-                    <h3>{{ flowSettingsTemplate.template_name }} - 流转顺序</h3>
-                    <p>设置流转卡在不同部门之间的流转顺序，按顺序依次流转</p>
-                </div>
+                <!-- 部门流转顺序设置对话框（模板） -->
+                <el-dialog title="部门流转顺序设置" :visible.sync="flowSettingsDialogVisible" width="80%" top="5vh">
+                    <div v-if="flowSettingsTemplate.id">
+                        <div class="flow-settings-header">
+                            <h3>{{ flowSettingsTemplate.template_name }} - 流转顺序</h3>
+                            <p>设置模板的默认流转顺序，按顺序依次流转</p>
+                        </div>
 
-                <!-- 添加部门 -->
-                <div style="margin-bottom: 20px;">
-                    <el-select v-model="newDepartmentForFlow" placeholder="选择要添加的部门" style="width: 300px; margin-right: 10px;">
-                        <el-option v-for="dept in availableDepartmentsForFlow" 
-                                    :key="dept.id" 
-                                    :label="dept.name" 
-                                    :value="dept.id">
-                        </el-option>
-                    </el-select>
-                    <el-button type="primary" @click="addDepartmentToFlow" icon="el-icon-plus">添加部门</el-button>
-                </div>
+                        <!-- 添加部门 -->
+                        <div style="margin-bottom: 20px;">
+                            <el-select v-model="newDepartmentForFlow" placeholder="选择要添加的部门" style="width: 300px; margin-right: 10px;">
+                                <el-option v-for="dept in availableDepartmentsForFlow" 
+                                            :key="dept.id" 
+                                            :label="dept.name" 
+                                            :value="dept.id">
+                                </el-option>
+                            </el-select>
+                            <el-button type="primary" @click="addDepartmentToFlow" icon="el-icon-plus">添加部门</el-button>
+                        </div>
 
-                <!-- 流转顺序列表 -->
-                <el-table :data="templateFlowDepartments" border style="width: 100%;">
-                    <el-table-column label="流转顺序" width="100" align="center">
-                        <template slot-scope="scope">
-                            <el-tag type="primary">{{ scope.$index + 1 }}</el-tag>
-                        </template>
-                    </el-table-column>
-                    <el-table-column label="部门名称" width="200">
-                        <template slot-scope="scope">
-                            <el-tag v-if="getDepartmentName(scope.row.department_id)" type="success">
-                                {{ getDepartmentName(scope.row.department_id) }}
-                            </el-tag>
-                            <span v-else style="color: #999;">未找到部门</span>
-                        </template>
-                    </el-table-column>
-                    <el-table-column label="是否必填" width="100" align="center">
-                        <template slot-scope="scope">
-                            <el-switch v-model="scope.row.is_required"></el-switch>
-                        </template>
-                    </el-table-column>
-                    <el-table-column label="超时时间（小时）" width="150" align="center">
-                        <template slot-scope="scope">
-                            <el-input-number v-model="scope.row.timeout_hours" :min="1" :max="720" size="small"></el-input-number>
-                        </template>
-                    </el-table-column>
-                    <el-table-column label="操作" width="200" align="center">
-                        <template slot-scope="scope">
-                            <el-button size="mini" @click="moveDepartmentUp(scope.row)" :disabled="scope.$index === 0" icon="el-icon-top">上移</el-button>
-                            <el-button size="mini" @click="moveDepartmentDown(scope.row)" :disabled="scope.$index === templateFlowDepartments.length - 1" icon="el-icon-bottom">下移</el-button>
-                            <el-button size="mini" type="danger" @click="removeDepartmentFromFlow(scope.row)" icon="el-icon-delete">删除</el-button>
-                        </template>
-                    </el-table-column>
-                </el-table>
+                        <!-- 流转顺序列表 -->
+                        <el-table :data="templateFlowDepartments" border style="width: 100%;">
+                            <el-table-column label="流转顺序" width="100" align="center">
+                                <template slot-scope="scope">
+                                    <el-tag type="primary">{{ scope.$index + 1 }}</el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="部门名称" width="200">
+                                <template slot-scope="scope">
+                                    <el-tag v-if="getDepartmentName(scope.row.department_id)" type="success">
+                                        {{ getDepartmentName(scope.row.department_id) }}
+                                    </el-tag>
+                                    <span v-else style="color: #999;">未找到部门</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="是否必填" width="100" align="center">
+                                <template slot-scope="scope">
+                                    <el-switch v-model="scope.row.is_required"></el-switch>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="超时时间（小时）" width="150" align="center">
+                                <template slot-scope="scope">
+                                    <el-input-number v-model="scope.row.timeout_hours" :min="1" :max="720" size="small"></el-input-number>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="200" align="center">
+                                <template slot-scope="scope">
+                                    <el-button size="mini" @click="moveDepartmentUp(scope.row)" :disabled="scope.$index === 0" icon="el-icon-top">上移</el-button>
+                                    <el-button size="mini" @click="moveDepartmentDown(scope.row)" :disabled="scope.$index === templateFlowDepartments.length - 1" icon="el-icon-bottom">下移</el-button>
+                                    <el-button size="mini" type="danger" @click="removeDepartmentFromFlow(scope.row)" icon="el-icon-delete">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
 
-                <!-- 提示信息 -->
-                <div style="margin-top: 20px; color: #666; font-size: 14px;">
-                    <p>💡 提示：</p>
-                    <ul>
-                        <li>流转顺序决定了流转卡在不同部门之间的流转路径</li>
-                        <li>每个流转卡将按照此顺序依次流转到各个部门</li>
-                        <li>上移/下移可以调整部门的流转顺序</li>
-                        <li>删除部门将从流转顺序中移除该部门</li>
-                    </ul>
-                </div>
-            </div>
+                        <!-- 提示信息 -->
+                        <div style="margin-top: 20px; color: #666; font-size: 14px;">
+                            <p>💡 提示：</p>
+                            <ul>
+                                <li>流转顺序决定了模板的默认流转路径</li>
+                                <li>修改模板流转顺序不影响已创建的流转卡</li>
+                                <li>需要单独修改某个流转卡的流转顺序时，请在流转卡管理页面操作</li>
+                                <li>上移/下移可以调整部门的流转顺序</li>
+                                <li>删除部门将从流转顺序中移除该部门</li>
+                            </ul>
+                        </div>
+                    </div>
 
-            <div slot="footer" class="dialog-footer">
-                <el-button @click="cancelFlowSettings">取消</el-button>
-                <el-button type="primary" @click="saveFlowSettings">保存流转顺序</el-button>
-            </div>
-        </el-dialog>
+                    <div slot="footer" class="dialog-footer">
+                        <el-button @click="cancelFlowSettings">取消</el-button>
+                        <el-button type="primary" @click="saveFlowSettings">保存流转顺序</el-button>
+                    </div>
+                </el-dialog>
+
+                <!-- 转流卡流转顺序设置对话框 -->
+                <el-dialog title="流转卡流转顺序设置" :visible.sync="cardFlowSettingsDialogVisible" width="80%" top="5vh">
+                    <div v-if="currentCardForFlowSettings.id">
+                        <div class="flow-settings-header">
+                            <h3>{{ currentCardForFlowSettings.card_number }} - 流转顺序</h3>
+                            <p>设置当前流转卡的流转顺序，只影响此流转卡，不影响模板和其他流转卡</p>
+                        </div>
+
+                        <!-- 添加部门 -->
+                        <div style="margin-bottom: 20px;">
+                            <el-select v-model="newDepartmentForCardFlow" placeholder="选择要添加的部门" style="width: 300px; margin-right: 10px;">
+                                <el-option v-for="dept in availableDepartmentsForCardFlow" 
+                                            :key="dept.id" 
+                                            :label="dept.name" 
+                                            :value="dept.id">
+                                </el-option>
+                            </el-select>
+                            <el-button type="primary" @click="addDepartmentToCardFlow" icon="el-icon-plus">添加部门</el-button>
+                        </div>
+
+                        <!-- 流转顺序列表 -->
+                        <el-table :data="cardFlowDepartments" border style="width: 100%;">
+                            <el-table-column label="流转顺序" width="100" align="center">
+                                <template slot-scope="scope">
+                                    <el-tag type="primary">{{ scope.$index + 1 }}</el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="部门名称" width="200">
+                                <template slot-scope="scope">
+                                    <el-tag v-if="getDepartmentName(scope.row.department_id)" type="success">
+                                        {{ getDepartmentName(scope.row.department_id) }}
+                                    </el-tag>
+                                    <span v-else style="color: #999;">未找到部门</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="是否必填" width="100" align="center">
+                                <template slot-scope="scope">
+                                    <el-switch v-model="scope.row.is_required"></el-switch>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="超时时间（小时）" width="150" align="center">
+                                <template slot-scope="scope">
+                                    <el-input-number v-model="scope.row.timeout_hours" :min="1" :max="720" size="small"></el-input-number>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="操作" width="200" align="center">
+                                <template slot-scope="scope">
+                                    <el-button size="mini" @click="moveCardDepartmentUp(scope.row)" :disabled="scope.$index === 0" icon="el-icon-top">上移</el-button>
+                                    <el-button size="mini" @click="moveCardDepartmentDown(scope.row)" :disabled="scope.$index === cardFlowDepartments.length - 1" icon="el-icon-bottom">下移</el-button>
+                                    <el-button size="mini" type="danger" @click="removeDepartmentFromCardFlow(scope.row)" icon="el-icon-delete">删除</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+
+                        <!-- 提示信息 -->
+                        <div style="margin-top: 20px; color: #666; font-size: 14px;">
+                            <p>💡 提示：</p>
+                            <ul>
+                                <li>流转顺序决定了流转卡在不同部门之间的流转路径</li>
+                                <li>修改此流转卡的流转顺序不会影响模板和其他流转卡</li>
+                                <li>上移/下移可以调整部门的流转顺序</li>
+                                <li>删除部门将从流转顺序中移除该部门</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div slot="footer" class="dialog-footer">
+                        <el-button @click="cancelCardFlowSettings">取消</el-button>
+                        <el-button type="primary" @click="saveCardFlowSettings">保存流转顺序</el-button>
+                    </div>
+                </el-dialog>
     </div>
 
     <script src="https://unpkg.com/vue@2/dist/vue.js"></script>
@@ -1480,7 +1556,7 @@
     
     <!-- 前端版本信息 -->
     <div style="position: fixed; bottom: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; padding: 5px 10px; border-radius: 3px; font-size: 12px; z-index: 9999;">
-        前端版本: v2026.01.04.1018 (流转卡提交到下一部门功能已完成)
+        前端版本: v2026.01.07.1022 (流转卡流转顺序单独修改功能已完成)
     </div>
 </body>
 </html>

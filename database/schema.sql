@@ -90,11 +90,25 @@ CREATE TABLE `templates` (
   CONSTRAINT `templates_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='模板表';
 
--- 5. transfer_cards 流转卡主表
+-- 5. template_snapshots 模板快照表（用于保存创建流转卡时的模板状态）
+CREATE TABLE `template_snapshots` (
+  `snapshot_id` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '快照ID（自动生成唯一值）',
+  `template_id` int DEFAULT NULL COMMENT '模板ID',
+  `template_name` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '模板名称（快照时保存）',
+  `template_description` text COLLATE utf8mb4_unicode_ci COMMENT '模板描述（快照时保存）',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`snapshot_id`),
+  KEY `idx_template_id` (`template_id`),
+  KEY `idx_created_at` (`created_at`),
+  CONSTRAINT `template_snapshots_ibfk_1` FOREIGN KEY (`template_id`) REFERENCES `templates` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='模板快照表';
+
+-- 6. transfer_cards 流转卡主表
 CREATE TABLE `transfer_cards` (
   `id` int NOT NULL AUTO_INCREMENT,
   `card_number` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '流转卡编号',
   `template_id` int DEFAULT NULL COMMENT '模板ID',
+  `snapshot_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '模板快照ID',
   `title` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '流转卡标题',
   `description` text COLLATE utf8mb4_unicode_ci COMMENT '流转卡描述',
   `status` enum('draft','in_progress','flowing','completed','cancelled','rejected') COLLATE utf8mb4_unicode_ci DEFAULT 'draft' COMMENT '状态',
@@ -112,11 +126,13 @@ CREATE TABLE `transfer_cards` (
   KEY `idx_status` (`status`),
   KEY `idx_creator` (`created_by`),
   KEY `idx_template` (`template_id`),
+  KEY `idx_snapshot` (`snapshot_id`),
   KEY `idx_current_department` (`current_department_id`),
   KEY `idx_transfer_cards_status_dept` (`status`,`current_department_id`),
   CONSTRAINT `fk_current_department` FOREIGN KEY (`current_department_id`) REFERENCES `departments` (`id`) ON DELETE SET NULL,
   CONSTRAINT `transfer_cards_ibfk_1` FOREIGN KEY (`template_id`) REFERENCES `templates` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `transfer_cards_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
+  CONSTRAINT `transfer_cards_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `transfer_cards_ibfk_3` FOREIGN KEY (`snapshot_id`) REFERENCES `template_snapshots` (`snapshot_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='流转卡主表';
 
 -- 6. card_data 流转卡数据表（每条记录一行数据）
@@ -373,11 +389,74 @@ CREATE TABLE `flow_operation_logs` (
   CONSTRAINT `flow_operation_logs_ibfk_4` FOREIGN KEY (`operator_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='流转操作日志表';
 
+-- 15. card_template_fields 流转卡模板快照字段表
+CREATE TABLE `card_template_fields` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `card_id` int NOT NULL COMMENT '流转卡ID',
+  `field_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '字段名称',
+  `field_display_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '字段显示名称',
+  `field_type` enum('text','number','date','select','boolean') COLLATE utf8mb4_unicode_ci DEFAULT 'text' COMMENT '字段类型',
+  `field_order` int DEFAULT '1' COMMENT '字段排序',
+  `is_required` tinyint(1) DEFAULT '0' COMMENT '是否必填',
+  `default_value` text COLLATE utf8mb4_unicode_ci COMMENT '默认值',
+  `options` text COLLATE utf8mb4_unicode_ci COMMENT '选项(JSON格式)',
+  `department_id` int DEFAULT NULL COMMENT '负责部门ID',
+  `department_name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '负责部门名称',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_card_field_order` (`card_id`,`field_order`),
+  KEY `idx_card` (`card_id`),
+  KEY `idx_field` (`field_name`),
+  KEY `idx_order` (`field_order`),
+  KEY `idx_department` (`department_id`),
+  CONSTRAINT `card_template_fields_ibfk_1` FOREIGN KEY (`card_id`) REFERENCES `transfer_cards` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='流转卡模板快照字段表';
+
+-- 16. card_department_flow 流转卡模板快照部门流转顺序表
+CREATE TABLE `card_department_flow` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `card_id` int NOT NULL COMMENT '流转卡ID',
+  `department_id` int NOT NULL COMMENT '部门ID',
+  `flow_order` int NOT NULL COMMENT '流转顺序',
+  `is_required` tinyint(1) DEFAULT '1' COMMENT '是否必须部门',
+  `auto_skip` tinyint(1) DEFAULT '0' COMMENT '是否自动跳过(无数据时)',
+  `timeout_hours` int DEFAULT '24' COMMENT '超时时间(小时)',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_card_department` (`card_id`,`department_id`),
+  KEY `idx_card` (`card_id`),
+  KEY `idx_department` (`department_id`),
+  KEY `idx_flow_order` (`card_id`,`flow_order`),
+  CONSTRAINT `card_department_flow_ibfk_1` FOREIGN KEY (`card_id`) REFERENCES `transfer_cards` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `card_department_flow_ibfk_2` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='流转卡模板快照部门流转顺序表';
+
+-- 17. card_field_permissions 流转卡模板快照字段权限表
+CREATE TABLE `card_field_permissions` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `card_id` int NOT NULL COMMENT '流转卡ID',
+  `field_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '字段名称',
+  `department_id` int NOT NULL COMMENT '部门ID',
+  `can_read` tinyint(1) DEFAULT '1' COMMENT '是否可读',
+  `can_write` tinyint(1) DEFAULT '1' COMMENT '是否可写',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_card_field_dept` (`card_id`,`field_name`,`department_id`),
+  KEY `idx_card` (`card_id`),
+  KEY `idx_field` (`field_name`),
+  KEY `idx_department` (`department_id`),
+  CONSTRAINT `card_field_permissions_ibfk_1` FOREIGN KEY (`card_id`) REFERENCES `transfer_cards` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `card_field_permissions_ibfk_2` FOREIGN KEY (`department_id`) REFERENCES `departments` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='流转卡模板快照字段权限表';
+
 -- ========================================
 -- 视图（最后创建）
 -- ========================================
 
--- 15. card_flow_history 流转卡流转历史视图
+-- 18. card_flow_history 流转卡流转历史视图
 CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `card_flow_history` AS
 SELECT 
   `tc`.`id` AS `card_id`,
